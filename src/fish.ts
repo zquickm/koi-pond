@@ -17,14 +17,14 @@ export interface Coat {
   fin: string;
 }
 
-// 0 红白 / 1 三色 / 2 黄金 / 3 乌鲤 / 4 丹顶 / 5 白金
+// 0 红白 / 1 三色 / 2 黄金 / 3 乌鲤 / 4 丹顶 / 5 白金（水墨国风降饱和配色）
 export const COATS: Coat[] = [
-  { body: '#f2efe6', edge: '#b9b4a4', patches: ['#c4574b'], fin: 'rgba(196,87,75,0.32)' },
-  { body: '#efece3', edge: '#b3aea0', patches: ['#3a3f45', '#c4574b'], fin: 'rgba(58,63,69,0.3)' },
-  { body: '#e3c084', edge: '#a98f5e', patches: null, fin: 'rgba(227,192,132,0.38)' },
-  { body: '#3e4247', edge: '#2b2e33', patches: null, fin: 'rgba(62,66,71,0.42)' },
-  { body: '#f2efe6', edge: '#b9b4a4', patches: ['#c4574b'], fin: 'rgba(196,87,75,0.32)' },
-  { body: '#edefea', edge: '#b7bdb5', patches: null, fin: 'rgba(232,236,231,0.4)' },
+  { body: '#f5f2e9', edge: '#b5ae9c', patches: ['#b8452f'], fin: 'rgba(184,69,47,0.3)' },
+  { body: '#f3f0e7', edge: '#b1ac9e', patches: ['#2f3238', '#b8452f'], fin: 'rgba(47,50,56,0.28)' },
+  { body: '#d9b36b', edge: '#a8854e', patches: null, fin: 'rgba(217,179,107,0.36)' },
+  { body: '#33373c', edge: '#232629', patches: null, fin: 'rgba(51,55,60,0.4)' },
+  { body: '#f5f2e9', edge: '#b5ae9c', patches: ['#b8452f'], fin: 'rgba(184,69,47,0.3)' },
+  { body: '#ecefe8', edge: '#b4bab2', patches: null, fin: 'rgba(236,239,232,0.38)' },
 ];
 
 const SEGS = 12;
@@ -124,7 +124,7 @@ export class Fish {
         steer += angDiff(Math.atan2(dy, dx), this.heading) * (1 - d / 55) * 1.2;
       }
     }
-    const margin = 90;
+    const margin = 115; // 别游上边框山石
     if (this.x < margin || this.x > W - margin || this.y < margin || this.y > H - margin) {
       steer += angDiff(Math.atan2(H / 2 - this.y, W / 2 - this.x), this.heading) * 2.5;
     }

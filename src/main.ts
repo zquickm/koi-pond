@@ -1,6 +1,6 @@
 import { Application, Sprite, Texture } from 'pixi.js';
 import { loadConfig } from './config';
-import { makeBottomTexture, WATER_TINT } from './bottom';
+import { makeBottomTexture, makeFogTexture, WATER_TINT } from './bottom';
 import { Water } from './water';
 import { School } from './fish';
 import { Lilies } from './lily';
@@ -11,7 +11,7 @@ const app = new Application();
 await app.init({
   resizeTo: window,
   antialias: true,
-  background: '#86a289',
+  background: '#c2d4c9',
   resolution: Math.min(window.devicePixelRatio || 1, 2),
   autoDensity: true,
 });
@@ -25,8 +25,16 @@ const lilies = new Lilies();
 // 水色罩：薄薄一层水色压在鱼和荷叶上，让它们"沉"在水里
 const veil = new Sprite(Texture.WHITE);
 veil.tint = WATER_TINT;
-veil.alpha = 0.09;
-app.stage.addChild(bottom, water.caustics, school.shadows, school.layer, lilies.layer, veil, water.highlight);
+veil.alpha = 0.07;
+// 烟波雾层：缓慢漂移的纸白大团
+const fogTex = makeFogTexture();
+const fogs = [0, 1, 2].map((i) => {
+  const s = new Sprite(fogTex);
+  s.anchor.set(0.5);
+  s.alpha = 0.05 + i * 0.008;
+  return s;
+});
+app.stage.addChild(bottom, water.caustics, school.shadows, school.layer, lilies.layer, veil, water.highlight, ...fogs);
 
 // 光标：浏览器与独立壳走 pointer 事件；macOS 钉桌面壳 D5 改 CGEvent 轮询注入，接口不变
 let cursor: { x: number; y: number } | null = null;
@@ -53,6 +61,10 @@ function layout(W: number, H: number) {
   lilies.layout(W, H);
   veil.width = W;
   veil.height = H;
+  for (const f of fogs) {
+    f.width = W * 1.1;
+    f.height = H * 0.8;
+  }
 }
 
 let T = 0;
@@ -70,4 +82,8 @@ app.ticker.add((tk) => {
   water.step(dt);
   school.update(dt, T, cursor, W, H, wake);
   lilies.step(dt, T);
+  fogs.forEach((f, i) => {
+    f.x = W * (0.5 + 0.28 * Math.sin(T * 0.021 + i * 2.1));
+    f.y = H * (0.5 + 0.3 * Math.sin(T * 0.017 + i * 1.7));
+  });
 });

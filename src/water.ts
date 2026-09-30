@@ -65,15 +65,15 @@ export class Water {
 
     this.highlight = new Sprite(Texture.from(this.cv));
     this.highlight.blendMode = 'add';
-    this.highlight.alpha = 0.42;
+    this.highlight.alpha = 0.36;
 
     const n = makeCausticTexture();
     this.c1 = new Sprite(n);
     this.c1.blendMode = 'add';
-    this.c1.alpha = 0.05;
+    this.c1.alpha = 0.035;
     this.c2 = new Sprite(n);
     this.c2.blendMode = 'add';
-    this.c2.alpha = 0.032;
+    this.c2.alpha = 0.022;
     this.caustics.addChild(this.c1, this.c2);
   }
 
@@ -126,16 +126,16 @@ export class Water {
       const v = c[i];
       if (v > CREST_T) {
         const a = Math.min(1, (v - CREST_T) * 4);
-        d[p] = 255;
-        d[p + 1] = 255;
-        d[p + 2] = 246;
+        d[p] = 235;
+        d[p + 1] = 245;
+        d[p + 2] = 240;
         d[p + 3] = (a * 255) | 0;
       } else if (v < -CREST_T) {
         const a = Math.min(1, (-v - CREST_T) * 2.5);
-        d[p] = 22;
-        d[p + 1] = 58;
-        d[p + 2] = 48;
-        d[p + 3] = (a * 120) | 0;
+        d[p] = 30;
+        d[p + 1] = 60;
+        d[p + 2] = 55;
+        d[p + 3] = (a * 110) | 0;
       } else {
         d[p + 3] = 0;
       }
@@ -146,7 +146,7 @@ export class Water {
 
     this.c1.rotation += dt * 0.006;
     this.c2.rotation -= dt * 0.0045;
-    this.c1.alpha = 0.05 + 0.006 * Math.sin(this.t * 0.3);
-    this.c2.alpha = 0.032 + 0.005 * Math.sin(this.t * 0.23 + 2);
+    this.c1.alpha = 0.033 + 0.005 * Math.sin(this.t * 0.3);
+    this.c2.alpha = 0.021 + 0.004 * Math.sin(this.t * 0.23 + 2);
   }
 }
