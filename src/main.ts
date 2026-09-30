@@ -4,6 +4,7 @@ import { makeBottomTexture, makeFogTexture, WATER_TINT } from './bottom';
 import { Water } from './water';
 import { School } from './fish';
 import { Lilies } from './lily';
+import { Critters } from './critters';
 
 const cfg = loadConfig();
 
@@ -22,6 +23,7 @@ const bottom = new Sprite(makeBottomTexture());
 const water = new Water();
 const school = new School(cfg.fish);
 const lilies = new Lilies();
+const critters = new Critters();
 // 水色罩：薄薄一层水色压在鱼和荷叶上，让它们"沉"在水里
 const veil = new Sprite(Texture.WHITE);
 veil.tint = WATER_TINT;
@@ -34,7 +36,18 @@ const fogs = [0, 1, 2].map((i) => {
   s.alpha = 0.05 + i * 0.008;
   return s;
 });
-app.stage.addChild(bottom, water.caustics, school.shadows, school.layer, lilies.layer, veil, water.highlight, ...fogs);
+app.stage.addChild(
+  bottom,
+  water.caustics,
+  critters.water,
+  school.shadows,
+  school.layer,
+  lilies.layer,
+  veil,
+  water.highlight,
+  ...fogs,
+  critters.air,
+);
 
 // 光标：浏览器与独立壳走 pointer 事件；macOS 钉桌面壳 D5 改 CGEvent 轮询注入，接口不变
 let cursor: { x: number; y: number } | null = null;
@@ -81,7 +94,8 @@ app.ticker.add((tk) => {
   }
   water.step(dt);
   school.update(dt, T, cursor, W, H, wake);
-  lilies.step(dt, T);
+  lilies.update(dt, T, wake);
+  critters.update(dt, T, W, H, wake);
   fogs.forEach((f, i) => {
     f.x = W * (0.5 + 0.28 * Math.sin(T * 0.021 + i * 2.1));
     f.y = H * (0.5 + 0.3 * Math.sin(T * 0.017 + i * 1.7));

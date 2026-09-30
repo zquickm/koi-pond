@@ -17,14 +17,14 @@ export interface Coat {
   fin: string;
 }
 
-// 0 红白 / 1 三色 / 2 黄金 / 3 乌鲤 / 4 丹顶 / 5 白金（水墨国风降饱和配色）
+// 0 朱砂鲤 / 1 墨斑鲤 / 2 金鲤 / 3 乌鲤 / 4 丹顶 / 5 白鲤（参照水墨册页：宣纸白身、朱砂斑、墨灰鳍尾）
 export const COATS: Coat[] = [
-  { body: '#f5f2e9', edge: '#b5ae9c', patches: ['#b8452f'], fin: 'rgba(184,69,47,0.3)' },
-  { body: '#f3f0e7', edge: '#b1ac9e', patches: ['#2f3238', '#b8452f'], fin: 'rgba(47,50,56,0.28)' },
-  { body: '#d9b36b', edge: '#a8854e', patches: null, fin: 'rgba(217,179,107,0.36)' },
-  { body: '#33373c', edge: '#232629', patches: null, fin: 'rgba(51,55,60,0.4)' },
-  { body: '#f5f2e9', edge: '#b5ae9c', patches: ['#b8452f'], fin: 'rgba(184,69,47,0.3)' },
-  { body: '#ecefe8', edge: '#b4bab2', patches: null, fin: 'rgba(236,239,232,0.38)' },
+  { body: '#f7f4ec', edge: '#8d8a80', patches: ['#bf3b2b'], fin: 'rgba(70,76,80,0.4)' },
+  { body: '#f6f3eb', edge: '#8d8a80', patches: ['#2f3238'], fin: 'rgba(70,76,80,0.4)' },
+  { body: '#e2bd72', edge: '#9a7c46', patches: null, fin: 'rgba(70,76,80,0.38)' },
+  { body: '#2f3238', edge: '#1f2226', patches: null, fin: 'rgba(40,44,48,0.5)' },
+  { body: '#f7f4ec', edge: '#8d8a80', patches: ['#bf3b2b'], fin: 'rgba(70,76,80,0.4)' },
+  { body: '#f3f2ea', edge: '#9a978c', patches: null, fin: 'rgba(70,76,80,0.34)' },
 ];
 
 const SEGS = 12;
@@ -81,14 +81,18 @@ export class Fish {
       this.py[i] = this.y - Math.sin(this.heading) * gap * i;
     }
     if (idx % COATS.length === 4) {
-      this.patches.push({ u: 0.05, side: 0, r: 1.0, ci: 0 }); // 丹顶：头顶一轮红
+      this.patches.push({ u: 0.05, side: 0, r: 1.0, ci: 0 }); // 丹顶：头顶一轮朱砂
+    } else if (idx % COATS.length === 0) {
+      // 朱砂鲤：肩部大斑，半数带尾斑（参照水墨锦鲤）
+      this.patches.push({ u: 0.12, side: 0.05, r: 1.5, ci: 0 });
+      if (Math.random() < 0.5) this.patches.push({ u: 0.62, side: -0.15, r: 0.8, ci: 0 });
     } else if (this.coat.patches) {
-      const n = 1 + ((Math.random() * 2) | 0);
+      const n = 2 + ((Math.random() * 2) | 0);
       for (let i = 0; i < n; i++) {
         this.patches.push({
           u: 0.14 + Math.random() * 0.55,
           side: Math.random() * 1.1 - 0.55,
-          r: 0.75 + Math.random() * 0.5,
+          r: 0.7 + Math.random() * 0.6,
           ci: (Math.random() * this.coat.patches.length) | 0,
         });
       }
@@ -221,12 +225,12 @@ export class Fish {
     pts.push(this.px[0] + dxs[0] * this.L * 0.055, this.py[0] + dys[0] * this.L * 0.055);
     for (let i = 0; i < SEGS; i++) pts.push(this.px[i] + nxs[i] * this.L * WIDTH_F[i], this.py[i] + nys[i] * this.L * WIDTH_F[i]);
     for (let i = SEGS - 1; i >= 0; i--) pts.push(this.px[i] - nxs[i] * this.L * WIDTH_F[i], this.py[i] - nys[i] * this.L * WIDTH_F[i]);
-    g.poly(pts).fill(this.coat.body).stroke({ color: this.coat.edge, width: 1, alpha: 0.4 });
+    g.poly(pts).fill(this.coat.body).stroke({ color: this.coat.edge, width: 1, alpha: 0.5 });
 
-    // 脊线阴影：给平面轮廓一点体积感
+    // 脊线墨痕：给平面轮廓一点体积感
     g.moveTo(this.px[1], this.py[1]);
     for (let i = 2; i < SEGS - 1; i++) g.lineTo(this.px[i], this.py[i]);
-    g.stroke({ color: this.coat.edge, width: this.L * 0.05, alpha: 0.12, cap: 'round' });
+    g.stroke({ color: this.coat.edge, width: this.L * 0.05, alpha: 0.16, cap: 'round' });
 
     // 花斑：沿脊柱的有机斑块（两圆重叠成不规则形，微透）
     if (this.coat.patches) {
