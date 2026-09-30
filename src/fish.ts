@@ -1,6 +1,8 @@
-// 素材锦鲤：水墨册页原图抠图直接上屏，旋转+滑行游动（保画味优先，不做脊柱弯曲）。
+// 素材锦鲤 × MeshRope：贴图绑在 14 节脊柱点上，行波头定尾摆 + 转弯顺势内弯，真正的"甩尾"。
 // 游动行为沿用：低通转向、滑行-加速、偶发窜游、避让光标与同伴。
-import { Container, Sprite, Texture } from 'pixi.js';
+import { Container, MeshRope, Point, Sprite, Texture } from 'pixi.js';
+
+const ROPE_N = 14;
 
 let shadowTex: Texture | null = null;
 function getShadowTex(): Texture {
@@ -23,8 +25,11 @@ function angDiff(a: number, b: number) {
 }
 
 export class Fish {
-  readonly sp: Sprite;
+  readonly container = new Container();
   readonly shadow = new Sprite(getShadowTex());
+  private mesh: MeshRope;
+  private pts: Point[] = [];
+  private s: number;
   private x: number;
   private y: number;
   private heading: number;
@@ -34,19 +39,24 @@ export class Fish {
   private dartT = 0;
   private nextDart = 4 + Math.random() * 8;
 
-  constructor(koi: Texture, idx: number, W = 1600, H = 1000) {
-    this.sp = new Sprite(koi);
-    this.sp.anchor.set(0.5);
-    // 贴图鱼头朝上：目标体长 100~150px 按贴图高缩放；半数镜像去重复感
-    const s = (100 + Math.random() * 50) / koi.height;
-    this.sp.scale.set(s, Math.random() < 0.5 ? -s : s);
+  constructor(koi: Texture, W = 1600, H = 1000) {
+    // 绳厚度恒等于贴图高度（MeshRope 规矩），故脊柱坐标全用贴图像素，靠容器缩放到目标体长
+    const hw = koi.width / 2;
+    for (let i = 0; i < ROPE_N; i++) {
+      this.pts.push(new Point(hw, 0));
+    }
+    this.mesh = new MeshRope({ texture: koi, points: this.pts });
+    this.container.addChild(this.mesh);
+    this.s = (100 + Math.random() * 50) / koi.width;
+    this.container.scale.set(this.s);
     this.heading = Math.random() * Math.PI * 2;
     this.speed = 22 + Math.random() * 12;
     this.x = W * (0.2 + Math.random() * 0.6);
     this.y = H * (0.2 + Math.random() * 0.6);
-    this.sp.position.set(this.x, this.y);
+    this.container.position.set(this.x, this.y);
     this.shadow.anchor.set(0.5);
     this.shadow.alpha = 0.26;
+    this.shadow.scale.set((koi.width * this.s) / 50);
   }
 
   update(dt: number, t: number, cursor: { x: number; y: number } | null, others: Fish[], W: number, H: number) {
@@ -90,11 +100,22 @@ export class Fish {
     this.y += Math.sin(this.heading) * sp * dt;
     this.x = Math.max(8, Math.min(W - 8, this.x));
     this.y = Math.max(8, Math.min(H - 8, this.y));
-    this.phase += dt * (1.6 + sp * 0.02);
+    // 摆尾频率随速度；窜游时更快更狠
+    this.phase += dt * (3.4 + sp * 0.06);
 
-    this.sp.position.set(this.x, this.y);
-    // 贴图鱼头朝上（-π/2），游向 heading 需补偿 +π/2；再加一点摆动感
-    this.sp.rotation = this.heading + Math.PI / 2 + Math.sin(t * 1.8 + this.phase) * 0.06;
+    // 行波（贴图像素单位）：头端固定，摆幅向尾部平方递增；转弯时身体向弯内倾（尾滞后）
+    // 脊柱沿贴图 X 轴：头在 +x（u=0 对应贴图左缘），尾在 -x；摆动即横向 y 偏移
+    const hw = this.mesh.texture.width / 2;
+    const bendBase = -this.av * 320;
+    for (let i = 0; i < ROPE_N; i++) {
+      const k = i / (ROPE_N - 1);
+      this.pts[i].x = hw - k * this.mesh.texture.width;
+      this.pts[i].y = Math.sin(this.phase - i * 0.72) * this.mesh.texture.width * 0.075 * k * k + bendBase * k * k;
+    }
+
+    this.container.position.set(this.x, this.y);
+    // 素材已转为头朝 +x，游向 heading 直接对齐
+    this.container.rotation = this.heading;
     this.shadow.x = this.x + 10;
     this.shadow.y = this.y + 18;
     this.shadow.rotation = this.heading;
@@ -108,10 +129,10 @@ export class School {
 
   constructor(koi: Texture, count: number) {
     for (let i = 0; i < count; i++) {
-      const f = new Fish(koi, i);
+      const f = new Fish(koi);
       this.fishes.push(f);
       this.shadows.addChild(f.shadow);
-      this.layer.addChild(f.sp);
+      this.layer.addChild(f.container);
     }
   }
 

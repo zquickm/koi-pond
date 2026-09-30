@@ -99,6 +99,18 @@ export function cropCanvas(
   return cv;
 }
 
+/** 逆时针旋转 90°：把竖构图（头朝上）素材转为头朝左——MeshRope 的路径沿贴图 X 轴 */
+export function rotate90CCW(cv: HTMLCanvasElement): HTMLCanvasElement {
+  const out = document.createElement('canvas');
+  out.width = cv.height;
+  out.height = cv.width;
+  const g = out.getContext('2d')!;
+  g.translate(0, cv.width);
+  g.rotate(-Math.PI / 2);
+  g.drawImage(cv, 0, 0);
+  return out;
+}
+
 /** 按非透明像素包围盒裁剪 */
 export function bboxCrop(cv: HTMLCanvasElement, pad = 6): HTMLCanvasElement {
   const w = cv.width;

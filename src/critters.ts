@@ -1,4 +1,4 @@
-// 水墨小生灵（素材版）：蝌蚪按连通域拆成独立贴图各自游弋；蜻蜓整图低空盘旋、偶发点水。
+// 水墨小生灵（素材版）：蝌蚪连通域拆分各自变速窜游；蜻蜓双曝残影模拟振翅、偶发点水。
 import { Container, Sprite, Texture } from 'pixi.js';
 
 interface TadArt {
@@ -41,8 +41,10 @@ class Tadpole {
 
   update(dt: number, t: number, W: number, H: number) {
     this.heading += Math.sin(t * 0.3 + this.phase) * 0.4 * dt + Math.sin(t * 0.13 + this.phase * 2) * 0.3 * dt;
-    this.x += Math.cos(this.heading) * this.speed * dt;
-    this.y += Math.sin(this.heading) * this.speed * dt;
+    // 蝌蚪是"蹬一下滑一下"的节奏
+    const sp = this.speed * (0.35 + 1.1 * Math.abs(Math.sin(t * 1.4 + this.phase)) ** 2);
+    this.x += Math.cos(this.heading) * sp * dt;
+    this.y += Math.sin(this.heading) * sp * dt;
     if (this.x < 50 || this.x > W - 50) {
       this.heading = Math.PI - this.heading;
       this.x = Math.max(50, Math.min(W - 50, this.x));
@@ -53,30 +55,39 @@ class Tadpole {
     }
     this.phase += dt * 2;
     this.sp.position.set(this.x, this.y);
-    this.sp.rotation = this.heading - this.fwd;
+    this.sp.rotation = this.heading - this.fwd + Math.sin(t * 6 + this.phase) * 0.08;
   }
 }
 
 class Dragonfly {
-  readonly sp: Sprite;
+  readonly root = new Container();
+  private base: Sprite;
+  private echo: Sprite; // 振翅残影
+  private s: number;
   private x: number;
   private y: number;
   private heading: number;
   private speed: number;
   private phase = Math.random() * 9;
+  private flap = Math.random() * 10;
   private dartT = 0;
   private nextDart = 4 + Math.random() * 6;
 
   constructor(tex: Texture, W: number, H: number) {
-    this.sp = new Sprite(tex);
-    this.sp.anchor.set(0.5);
-    const s = 100 / tex.width;
-    this.sp.scale.set(s);
+    this.s = 100 / tex.width;
+    this.base = new Sprite(tex);
+    this.base.anchor.set(0.5);
+    this.base.scale.set(this.s);
+    this.echo = new Sprite(tex);
+    this.echo.anchor.set(0.5);
+    this.echo.alpha = 0.32;
+    this.echo.scale.set(this.s);
+    this.root.addChild(this.base, this.echo);
     this.heading = Math.random() * Math.PI * 2;
     this.speed = 26 + Math.random() * 14;
     this.x = W * (0.3 + Math.random() * 0.4);
     this.y = H * (0.3 + Math.random() * 0.4);
-    this.sp.position.set(this.x, this.y);
+    this.root.position.set(this.x, this.y);
   }
 
   update(dt: number, t: number, W: number, H: number, wake?: (nx: number, ny: number) => void) {
@@ -100,10 +111,16 @@ class Dragonfly {
     this.x += Math.cos(this.heading) * sp * dt;
     this.y += Math.sin(this.heading) * sp * dt + Math.sin(t * 1.7 + this.phase) * 6 * dt;
     this.phase += dt;
+    this.flap += dt * 42;
     if (wake && this.dartT > 0 && Math.random() < dt * 3) wake(this.x / W, this.y / H);
-    this.sp.position.set(this.x, this.y);
-    // 素材蜻蜓头朝上
-    this.sp.rotation = this.heading + Math.PI / 2 + Math.sin(t * 2.5 + this.phase) * 0.07;
+
+    this.root.position.set(this.x, this.y);
+    const rot = this.heading + Math.PI / 2 + Math.sin(t * 2.5 + this.phase) * 0.07;
+    this.base.rotation = rot;
+    // 残影高频抖动+横向伸缩 = 振翅的视觉模糊
+    this.echo.rotation = rot + Math.sin(this.flap) * 0.06;
+    this.echo.scale.set(this.s * (1 + 0.1 * Math.sin(this.flap * 0.5)), this.s);
+    this.echo.alpha = 0.22 + 0.14 * Math.abs(Math.sin(this.flap * 0.5));
   }
 }
 
@@ -120,7 +137,7 @@ export class Critters {
       this.water.addChild(tad.sp);
     }
     this.dfly = new Dragonfly(dflyTex, 1600, 1000);
-    this.air.addChild(this.dfly.sp);
+    this.air.addChild(this.dfly.root);
   }
 
   update(dt: number, t: number, W: number, H: number, wake?: (nx: number, ny: number) => void) {

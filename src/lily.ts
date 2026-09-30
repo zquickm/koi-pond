@@ -1,4 +1,5 @@
-// 国风点缀：素材莲叶/荷花直接上屏（白底抠图），墨梅枝与莲蕾仍为程序绘制；守叶青蛙（鼓腮泛涟漪）。
+// 国风点缀：素材莲叶/荷花直接上屏（白底抠图），墨梅枝与莲蕾仍为程序绘制。
+// 动效：荷叶三频漂移+呼吸+蛙落地回弹；蛙三落脚点弹跳循环（压腿→腾空→落地涟漪）+鼓腮。
 import { Container, Sprite, Texture } from 'pixi.js';
 
 function mulberry32(seed: number) {
@@ -133,6 +134,11 @@ interface Pad {
   s: Sprite;
   baseRot: number;
   wobble: number;
+  hx: number;
+  hy: number;
+  dip: number; // 蛙落地时的下沉量
+  bsx: number; // 基准缩放
+  bsy: number;
 }
 
 export class Lilies {
@@ -142,7 +148,14 @@ export class Lilies {
   private branch = new Sprite(plumTexture());
   private bud = new Sprite(budTexture());
   private frog: Sprite;
-  private croakT = 6 + Math.random() * 6;
+  private frogSpots: { x: number; y: number }[] = [];
+  private frogAt = 0;
+  private hopT = -1;
+  private hopFrom = 0;
+  private hopTo = 0;
+  private nextHop = 5 + Math.random() * 5;
+  private landT = 0;
+  private croakT = 9 + Math.random() * 6;
   private croakAnim = 0;
   private frogBase = 1;
 
@@ -162,14 +175,20 @@ export class Lilies {
       s.rotation = sp.rot;
       s.position.set(sp.rx * 1600, sp.ry * 1000);
       this.layer.addChild(s);
-      this.pads.push({ s, baseRot: sp.rot, wobble: Math.random() * 10 });
+      this.pads.push({ s, baseRot: sp.rot, wobble: Math.random() * 10, hx: sp.rx * 1600, hy: sp.ry * 1000, dip: 0, bsx: sp.size / leaf.width, bsy: sp.size / leaf.height });
     }
-    // 蛙蹲右下大叶（避开荷花）
+    // 蛙蹲右下大叶：三个落脚点轮流跳
+    const bigSize = spots[1].size;
+    this.frogSpots = [
+      { x: bigSize * 0.2, y: bigSize * 0.15 },
+      { x: -bigSize * 0.17, y: bigSize * 0.09 },
+      { x: bigSize * 0.02, y: -bigSize * 0.16 },
+    ];
     this.frog = new Sprite(frogTex);
-    this.frog.anchor.set(0.5);
-    this.frogBase = (spots[1].size * 0.52) / frogTex.width;
+    this.frog.anchor.set(0.5, 0.72);
+    this.frogBase = (bigSize * 0.5) / frogTex.width;
     this.frog.scale.set(this.frogBase);
-    this.frog.position.set(spots[1].size * 0.2, spots[1].size * 0.16);
+    this.frog.position.set(this.frogSpots[0].x, this.frogSpots[0].y);
     this.pads[1].s.addChild(this.frog);
 
     this.flower = new Sprite(lotus);
@@ -193,7 +212,9 @@ export class Lilies {
       [0.13, 0.88],
     ];
     this.pads.forEach((p, i) => {
-      p.s.position.set(spots[i][0] * W, spots[i][1] * H);
+      p.hx = spots[i][0] * W;
+      p.hy = spots[i][1] * H;
+      p.s.position.set(p.hx, p.hy);
     });
     this.branch.width = W * 0.42;
     this.branch.height = this.branch.width * (430 / 820);
@@ -203,17 +224,63 @@ export class Lilies {
   }
 
   update(dt: number, t: number, wake?: (nx: number, ny: number) => void) {
-    for (const p of this.pads) p.s.rotation = p.baseRot + Math.sin(t * 0.25 + p.wobble) * 0.012;
+    // 荷叶：三频漂移 + 呼吸 + 落地下沉回弹
+    for (const p of this.pads) {
+      if (p.dip > 0) p.dip = Math.max(0, p.dip - dt * 0.25);
+      p.s.x = p.hx + Math.sin(t * 0.31 + p.wobble) * 6;
+      p.s.y = p.hy + Math.cos(t * 0.23 + p.wobble) * 5 + p.dip * 14;
+      p.s.rotation = p.baseRot + Math.sin(t * 0.19 + p.wobble) * 0.03;
+      const breathe = 1 + Math.sin(t * 0.27 + p.wobble) * 0.008;
+      const sc = breathe - p.dip * 0.05;
+      p.s.scale.set(p.bsx * sc, p.bsy * sc);
+    }
+
     this.flower.rotation = Math.sin(t * 0.2) * 0.02;
 
-    // 蛙鸣：鼓腮一次 + 叶周涟漪
+    // 蛙：闲时呼吸；到点压腿起跳→抛物线→落地涟漪+叶沉
+    const pad = this.pads[1];
+    if (this.hopT >= 0) {
+      this.hopT += dt;
+      const k = Math.min(1, this.hopT / 0.55);
+      const a = this.frogSpots[this.hopFrom];
+      const b = this.frogSpots[this.hopTo];
+      const lift = Math.sin(k * Math.PI);
+      this.frog.position.set(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k - lift * 22);
+      this.frog.scale.set(this.frogBase * (1 - 0.1 * lift), this.frogBase * (1 + 0.16 * lift));
+      this.frog.rotation = (b.x >= a.x ? 1 : -1) * 0.12 * lift;
+      if (k >= 1) {
+        this.hopT = -1;
+        this.frogAt = this.hopTo;
+        this.landT = 0.2;
+        pad.dip = 0.5;
+        wake?.(0.87, 0.79);
+      }
+    } else {
+      this.nextHop -= dt;
+      if (this.landT > 0) {
+        this.landT -= dt;
+        const q = this.landT / 0.2;
+        this.frog.scale.set(this.frogBase * (1 + 0.1 * q), this.frogBase * (1 - 0.12 * q));
+      } else {
+        this.frog.scale.set(this.frogBase, this.frogBase * (1 + 0.014 * Math.sin(t * 2.3)));
+        this.frog.rotation = 0;
+      }
+      if (this.nextHop <= 0) {
+        this.nextHop = 6 + Math.random() * 8;
+        this.hopFrom = this.frogAt;
+        this.hopTo = (this.frogAt + 1 + ((Math.random() * (this.frogSpots.length - 1)) | 0)) % this.frogSpots.length;
+        this.hopT = 0;
+      }
+    }
+
+    // 蛙鸣：鼓腮一次（不与跳跃/落地打架）
     this.croakT -= dt;
     if (this.croakT <= 0) {
       this.croakAnim = 0.7;
-      this.croakT = 8 + Math.random() * 8;
+      this.croakT = 11 + Math.random() * 8;
       wake?.(0.87, 0.79);
     }
-    if (this.croakAnim > 0) {
+    if (this.croakAnim > 0 && this.hopT < 0 && this.landT <= 0) {
       this.croakAnim -= dt;
       const k = 1 - Math.max(0, this.croakAnim) / 0.7;
       this.frog.scale.set(this.frogBase * (1 + 0.06 * Math.sin(k * Math.PI)));
