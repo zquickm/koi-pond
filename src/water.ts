@@ -1,25 +1,44 @@
-// 水面两层：涟漪高光 = CPU 双缓冲波动方程；焦散 = 两层噪声纹理慢旋。
-// ponytail: CPU 网格上限 320×200（每帧 <0.5ms）；要全屏位移折射时升级为 GPU framebuffer，对外接口不变。
+// 水面：涟漪 = CPU 双缓冲波动方程（细网格、强阻尼、克制的扰动）；焦散 = 脉络纹理慢旋。
+// 审美基准：水面近乎静止，只有 interactions 的细波纹；忌大圈、忌亮环。
+// ponytail: CPU 网格 512×320（每帧 ~2ms，M4 富余）；要全屏位移折射时升级 GPU framebuffer，接口不变。
 import { Container, Sprite, Texture } from 'pixi.js';
 
-const SIM_W = 320;
-const SIM_H = 200;
-const DAMP = 0.986;
+const SIM_W = 512;
+const SIM_H = 320;
+const DAMP = 0.956;
+const CREST_T = 0.045;
 
-function makeNoiseTexture(): Texture {
+function makeCausticTexture(): Texture {
   const cv = document.createElement('canvas');
-  cv.width = 256;
-  cv.height = 256;
+  cv.width = 512;
+  cv.height = 512;
   const g = cv.getContext('2d')!;
-  for (let i = 0; i < 55; i++) {
-    const x = Math.random() * 256;
-    const y = Math.random() * 256;
-    const r = 18 + Math.random() * 55;
-    const rg = g.createRadialGradient(x, y, 0, x, y, r);
-    rg.addColorStop(0, 'rgba(255,255,250,0.30)');
-    rg.addColorStop(1, 'rgba(255,255,250,0)');
-    g.fillStyle = rg;
-    g.fillRect(x - r, y - r, r * 2, r * 2);
+  g.lineCap = 'round';
+  // 细脉络（焦散网）
+  for (let i = 0; i < 130; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const a = Math.random() * Math.PI * 2;
+    const len = 40 + Math.random() * 90;
+    g.strokeStyle = `rgba(255,255,248,${0.04 + Math.random() * 0.05})`;
+    g.lineWidth = 2 + Math.random() * 6;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.quadraticCurveTo(x + Math.cos(a) * len * 0.5 + (Math.random() - 0.5) * 60, y + Math.sin(a) * len * 0.5 + (Math.random() - 0.5) * 60, x + Math.cos(a) * len, y + Math.sin(a) * len);
+    g.stroke();
+  }
+  // 宽软带（大尺度明暗）
+  for (let i = 0; i < 26; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const a = Math.random() * Math.PI * 2;
+    const len = 120 + Math.random() * 160;
+    g.strokeStyle = 'rgba(255,255,248,0.028)';
+    g.lineWidth = 14 + Math.random() * 14;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.quadraticCurveTo(x + Math.cos(a) * len * 0.5 + (Math.random() - 0.5) * 80, y + Math.sin(a) * len * 0.5 + (Math.random() - 0.5) * 80, x + Math.cos(a) * len, y + Math.sin(a) * len);
+    g.stroke();
   }
   return Texture.from(cv);
 }
@@ -35,7 +54,7 @@ export class Water {
   private ctx: CanvasRenderingContext2D;
   private img: ImageData;
   private t = 0;
-  private nextAmbient = 2;
+  private nextAmbient = 18;
 
   constructor() {
     this.cv = document.createElement('canvas');
@@ -46,15 +65,15 @@ export class Water {
 
     this.highlight = new Sprite(Texture.from(this.cv));
     this.highlight.blendMode = 'add';
-    this.highlight.alpha = 0.55;
+    this.highlight.alpha = 0.42;
 
-    const n = makeNoiseTexture();
+    const n = makeCausticTexture();
     this.c1 = new Sprite(n);
     this.c1.blendMode = 'add';
-    this.c1.alpha = 0.07;
+    this.c1.alpha = 0.05;
     this.c2 = new Sprite(n);
     this.c2.blendMode = 'add';
-    this.c2.alpha = 0.05;
+    this.c2.alpha = 0.032;
     this.caustics.addChild(this.c1, this.c2);
   }
 
@@ -63,14 +82,14 @@ export class Water {
     this.highlight.height = H;
     for (const c of [this.c1, this.c2]) {
       c.anchor.set(0.5);
-      c.width = W * 1.8;
-      c.height = H * 1.8;
+      c.width = W * 2.2;
+      c.height = H * 2.2;
       c.position.set(W / 2, H / 2);
     }
   }
 
-  /** nx, ny ∈ [0,1]（归一化屏幕坐标） */
-  drop(nx: number, ny: number, r = 2.8, strength = 1) {
+  /** nx, ny ∈ [0,1]（归一化屏幕坐标）。默认小而轻。 */
+  drop(nx: number, ny: number, r = 1.8, strength = 0.5) {
     const cx = nx * SIM_W;
     const cy = ny * SIM_H;
     for (let y = Math.max(1, Math.floor(cy - r)); y < Math.min(SIM_H - 1, cy + r + 1); y++) {
@@ -85,8 +104,9 @@ export class Water {
     this.t += dt;
     this.nextAmbient -= dt;
     if (this.nextAmbient <= 0) {
-      this.drop(Math.random(), Math.random(), 2 + Math.random() * 3, 0.6 + Math.random() * 0.8);
-      this.nextAmbient = 2.5 + Math.random() * 3;
+      // 极罕见的偶发涟漪（一片落叶），轻到几乎注意不到
+      this.drop(Math.random(), Math.random(), 1.4, 0.18);
+      this.nextAmbient = 14 + Math.random() * 16;
     }
 
     const { cur, prev } = this;
@@ -99,23 +119,23 @@ export class Water {
     }
     [this.cur, this.prev] = [this.prev, this.cur];
 
-    // 高光着色：波峰偏白、波谷偏深
+    // 高光着色：只有明显的波峰才显形，波谷极淡
     const d = this.img.data;
     const c = this.cur;
     for (let i = 0, p = 0; i < c.length; i++, p += 4) {
       const v = c[i];
-      if (v > 0.02) {
-        const a = Math.min(1, v * 3);
+      if (v > CREST_T) {
+        const a = Math.min(1, (v - CREST_T) * 4);
         d[p] = 255;
         d[p + 1] = 255;
-        d[p + 2] = 245;
+        d[p + 2] = 246;
         d[p + 3] = (a * 255) | 0;
-      } else if (v < -0.02) {
-        const a = Math.min(1, -v * 3);
-        d[p] = 20;
-        d[p + 1] = 60;
-        d[p + 2] = 50;
-        d[p + 3] = (a * 160) | 0;
+      } else if (v < -CREST_T) {
+        const a = Math.min(1, (-v - CREST_T) * 2.5);
+        d[p] = 22;
+        d[p + 1] = 58;
+        d[p + 2] = 48;
+        d[p + 3] = (a * 120) | 0;
       } else {
         d[p + 3] = 0;
       }
@@ -124,9 +144,9 @@ export class Water {
     const src = this.highlight.texture.source as unknown as { update?: () => void };
     src.update?.();
 
-    this.c1.rotation += dt * 0.02;
-    this.c2.rotation -= dt * 0.015;
-    this.c1.alpha = 0.06 + 0.02 * Math.sin(this.t * 0.4);
-    this.c2.alpha = 0.05 + 0.015 * Math.sin(this.t * 0.3 + 2);
+    this.c1.rotation += dt * 0.006;
+    this.c2.rotation -= dt * 0.0045;
+    this.c1.alpha = 0.05 + 0.006 * Math.sin(this.t * 0.3);
+    this.c2.alpha = 0.032 + 0.005 * Math.sin(this.t * 0.23 + 2);
   }
 }

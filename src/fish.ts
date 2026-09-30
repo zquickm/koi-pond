@@ -1,20 +1,35 @@
-// 占位鱼：脊柱链 12 节 + 链式跟随 + 正弦摆尾。D2 换 SVG 图集后，本文件只留行为逻辑。
+// 锦鲤：细长水彩体型（脊柱节点 → 法线偏移 → 平滑轮廓多边形），克制的游动
+// （低通转向 + 滑行-加速节律 + 偶发窜游）。审美基准见 2026-09-28 参考视频：鱼小型修长、
+// 游姿从容、摆尾幅度小；忌分节感、忌大波纹。
 import { Container, Graphics, Sprite, Texture } from 'pixi.js';
+
+export interface Patch {
+  u: number;
+  side: number;
+  r: number;
+  ci: number;
+}
 
 export interface Coat {
   body: string;
-  patch: string | null;
+  edge: string;
+  patches: string[] | null;
   fin: string;
 }
 
+// 0 红白 / 1 三色 / 2 黄金 / 3 乌鲤 / 4 丹顶 / 5 白金
 export const COATS: Coat[] = [
-  { body: '#f6f2e7', patch: '#d94a2e', fin: 'rgba(217,74,46,0.5)' }, // 红白
-  { body: '#eab35c', patch: null, fin: 'rgba(234,179,92,0.5)' }, // 黄金
-  { body: '#efe9dc', patch: '#c9bf9f', fin: 'rgba(214,205,184,0.55)' }, // 素白
+  { body: '#f2efe6', edge: '#b9b4a4', patches: ['#c4574b'], fin: 'rgba(196,87,75,0.32)' },
+  { body: '#efece3', edge: '#b3aea0', patches: ['#3a3f45', '#c4574b'], fin: 'rgba(58,63,69,0.3)' },
+  { body: '#e3c084', edge: '#a98f5e', patches: null, fin: 'rgba(227,192,132,0.38)' },
+  { body: '#3e4247', edge: '#2b2e33', patches: null, fin: 'rgba(62,66,71,0.42)' },
+  { body: '#f2efe6', edge: '#b9b4a4', patches: ['#c4574b'], fin: 'rgba(196,87,75,0.32)' },
+  { body: '#edefea', edge: '#b7bdb5', patches: null, fin: 'rgba(232,236,231,0.4)' },
 ];
 
 const SEGS = 12;
-const PROFILE = [0.42, 0.58, 0.72, 0.82, 0.88, 0.9, 0.86, 0.78, 0.66, 0.52, 0.38, 0.26];
+// 半宽/体长 沿脊柱分布：最长宽 0.119L → 全宽 0.24L，长宽比约 4:1
+const WIDTH_F = [0.055, 0.088, 0.108, 0.117, 0.119, 0.116, 0.108, 0.096, 0.08, 0.06, 0.04, 0.022];
 
 function angDiff(a: number, b: number) {
   return Math.atan2(Math.sin(a - b), Math.cos(a - b));
@@ -28,7 +43,7 @@ function getShadowTex(): Texture {
   cv.height = 64;
   const g = cv.getContext('2d')!;
   const rg = g.createRadialGradient(32, 32, 2, 32, 32, 30);
-  rg.addColorStop(0, 'rgba(20,45,38,0.55)');
+  rg.addColorStop(0, 'rgba(20,45,38,0.42)');
   rg.addColorStop(1, 'rgba(20,45,38,0)');
   g.fillStyle = rg;
   g.fillRect(0, 0, 64, 64);
@@ -40,41 +55,63 @@ export class Fish {
   readonly gfx = new Graphics();
   readonly shadow = new Sprite(getShadowTex());
   private coat: Coat;
-  private size: number;
-  private speed: number;
+  private L: number; // 体长 px
+  private base: number; // 基础速度
   private heading: number;
+  private av = 0; // 角速度（低通后的转向）
   private phase = Math.random() * 10;
+  private dartT = 0;
+  private nextDart = 4 + Math.random() * 8;
   private x: number;
   private y: number;
   private px = new Float32Array(SEGS);
   private py = new Float32Array(SEGS);
-  private patches: { seg: number; off: number; r: number }[] = [];
+  private patches: Patch[] = [];
 
-  constructor(idx: number, W = 1280, H = 800) {
+  constructor(idx: number, W = 1600, H = 1000) {
     this.coat = COATS[idx % COATS.length];
-    this.size = 26 + Math.random() * 12;
-    this.speed = 34 + Math.random() * 26;
+    this.L = 52 + Math.random() * 26;
+    this.base = 20 + Math.random() * 10;
     this.heading = Math.random() * Math.PI * 2;
-    this.x = W * (0.25 + Math.random() * 0.5);
-    this.y = H * (0.25 + Math.random() * 0.5);
+    this.x = W * (0.2 + Math.random() * 0.6);
+    this.y = H * (0.2 + Math.random() * 0.6);
+    const gap = this.L / (SEGS - 1);
     for (let i = 0; i < SEGS; i++) {
-      this.px[i] = this.x - Math.cos(this.heading) * i * this.size * 0.3;
-      this.py[i] = this.y - Math.sin(this.heading) * i * this.size * 0.3;
+      this.px[i] = this.x - Math.cos(this.heading) * gap * i;
+      this.py[i] = this.y - Math.sin(this.heading) * gap * i;
     }
-    const n = 1 + ((Math.random() * 3) | 0);
-    for (let i = 0; i < n; i++) {
-      this.patches.push({ seg: (Math.random() * 8) | 0, off: Math.random() * 1.2 - 0.6, r: 0.5 + Math.random() * 0.6 });
+    if (idx % COATS.length === 4) {
+      this.patches.push({ u: 0.05, side: 0, r: 1.0, ci: 0 }); // 丹顶：头顶一轮红
+    } else if (this.coat.patches) {
+      const n = 1 + ((Math.random() * 2) | 0);
+      for (let i = 0; i < n; i++) {
+        this.patches.push({
+          u: 0.14 + Math.random() * 0.55,
+          side: Math.random() * 1.1 - 0.55,
+          r: 0.75 + Math.random() * 0.5,
+          ci: (Math.random() * this.coat.patches.length) | 0,
+        });
+      }
     }
     this.shadow.anchor.set(0.5);
   }
 
-  update(dt: number, t: number, cursor: { x: number; y: number } | null, others: Fish[], W: number, H: number) {
-    let steer = Math.sin(t * 0.4 + this.phase) * 0.5;
+  update(
+    dt: number,
+    t: number,
+    cursor: { x: number; y: number } | null,
+    others: Fish[],
+    W: number,
+    H: number,
+    wake?: (x: number, y: number) => void,
+  ) {
+    // 转向源：慢漫游 + 轻避让 + 轻分离 + 回中心；全部低通后施加
+    let steer = Math.sin(t * 0.13 + this.phase) * 0.3;
     if (cursor) {
       const dx = this.x - cursor.x;
       const dy = this.y - cursor.y;
       const d = Math.hypot(dx, dy);
-      if (d < 150 && d > 1) steer += angDiff(Math.atan2(dy, dx), this.heading) * ((150 - d) / 150) * 4;
+      if (d < 110 && d > 1) steer += angDiff(Math.atan2(dy, dx), this.heading) * ((110 - d) / 110) * 1.4;
     }
     for (const o of others) {
       // ponytail: O(n²) 分离检测，鱼 >50 条时换空间哈希
@@ -82,39 +119,58 @@ export class Fish {
       const dx = this.x - o.x;
       const dy = this.y - o.y;
       const d2 = dx * dx + dy * dy;
-      if (d2 < 3600 && d2 > 1) {
+      if (d2 < 3000 && d2 > 1) {
         const d = Math.sqrt(d2);
-        steer += angDiff(Math.atan2(dy, dx), this.heading) * (1 - d / 60) * 2;
+        steer += angDiff(Math.atan2(dy, dx), this.heading) * (1 - d / 55) * 1.2;
       }
     }
-    const margin = 70;
+    const margin = 90;
     if (this.x < margin || this.x > W - margin || this.y < margin || this.y > H - margin) {
-      steer += angDiff(Math.atan2(H / 2 - this.y, W / 2 - this.x), this.heading) * 3;
+      steer += angDiff(Math.atan2(H / 2 - this.y, W / 2 - this.x), this.heading) * 2.5;
     }
-    this.heading += steer * dt;
+    this.av += (steer - this.av) * Math.min(1, dt * 2.5);
+    this.heading += this.av * dt;
 
-    const sp = this.speed * (0.85 + 0.3 * Math.sin(t * 0.23 + this.phase));
+    // 速度：滑行-加速节律 + 偶发窜游
+    const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(t * 0.5 + this.phase)) ** 1.5;
+    let sp = this.base * pulse;
+    this.nextDart -= dt;
+    if (this.nextDart <= 0) {
+      this.dartT = 0.8;
+      this.nextDart = 6 + Math.random() * 8;
+    }
+    if (this.dartT > 0) {
+      this.dartT -= dt;
+      sp *= 2.1;
+    }
+
     this.x += Math.cos(this.heading) * sp * dt;
     this.y += Math.sin(this.heading) * sp * dt;
     this.x = Math.max(8, Math.min(W - 8, this.x));
     this.y = Math.max(8, Math.min(H - 8, this.y));
-    this.phase += dt * (2.5 + sp * 0.07);
+    this.phase += dt * (2.6 + sp * 0.06);
 
-    // 链式跟随 + 沿脊柱传播的摆尾波
-    const gap = this.size * 0.3;
+    // 链式跟随 + 沿脊柱传播的小幅摆尾波（摆幅随节点衰减，天然平滑，不要夹具）
+    const gap = this.L / (SEGS - 1);
     for (let i = 1; i < SEGS; i++) {
       const a =
         Math.atan2(this.py[i] - this.py[i - 1], this.px[i] - this.px[i - 1]) +
-        Math.sin(this.phase - i * 0.55) * 0.2 * (i / SEGS);
+        Math.sin(this.phase - i * 0.5) * 0.05 * (i / SEGS);
       this.px[i] = this.px[i - 1] + Math.cos(a) * gap;
       this.py[i] = this.py[i - 1] + Math.sin(a) * gap;
     }
 
-    this.shadow.x = this.x + this.size * 0.3;
-    this.shadow.y = this.y + this.size * 0.55;
+    // 尾波：只在窜游或急转时偶发，极轻
+    if (wake && (this.dartT > 0 || Math.abs(this.av) > 0.55) && Math.random() < dt * 2.2) {
+      wake(this.px[SEGS - 1], this.py[SEGS - 1]);
+    }
+
+    this.shadow.x = this.x + this.L * 0.1;
+    this.shadow.y = this.y + this.L * 0.16;
     this.shadow.rotation = this.heading;
-    const s = this.size / 30;
-    this.shadow.scale.set(s * 1.4, s);
+    const s = this.L / 64;
+    this.shadow.scale.set(s * 1.35, s * 0.95);
+    this.shadow.alpha = 0.3;
     this.draw();
   }
 
@@ -122,53 +178,76 @@ export class Fish {
     const g = this.gfx;
     g.clear();
 
-    // 尾鳍（画在身体下面）
-    const b = SEGS - 4;
-    const dirx = this.px[b] - this.px[SEGS - 1];
-    const diry = this.py[b] - this.py[SEGS - 1];
-    const dl = Math.hypot(dirx, diry) || 1;
-    const fx = dirx / dl;
-    const fy = diry / dl;
-    const pxp = -fy;
-    const pyp = fx;
-    const r = this.size * 0.5 * PROFILE[b];
-    const len = this.size * 0.85 * (1 + Math.sin(this.phase) * 0.18);
-    g.poly([this.px[b] + pxp * r, this.py[b] + pyp * r, this.px[b] - pxp * r, this.py[b] - pyp * r, this.px[SEGS - 1] - fx * len, this.py[SEGS - 1] - fy * len]).fill(this.coat.fin);
-
-    // 身体（尾→头，头覆盖在尾上）
-    for (let i = SEGS - 1; i >= 0; i--) {
-      g.circle(this.px[i], this.py[i], this.size * 0.5 * PROFILE[i]).fill(this.coat.body);
+    // 各节点切向与法线（指向头为正方向）
+    const dxs = new Float32Array(SEGS);
+    const dys = new Float32Array(SEGS);
+    const nxs = new Float32Array(SEGS);
+    const nys = new Float32Array(SEGS);
+    for (let i = 0; i < SEGS; i++) {
+      const a = this.px[Math.max(i - 1, 0)] - this.px[Math.min(i + 1, SEGS - 1)];
+      const b = this.py[Math.max(i - 1, 0)] - this.py[Math.min(i + 1, SEGS - 1)];
+      const l = Math.hypot(a, b) || 1;
+      dxs[i] = a / l;
+      dys[i] = b / l;
+      nxs[i] = -dys[i];
+      nys[i] = dxs[i];
     }
 
-    // 胸鳍
-    const hdx = Math.cos(this.heading);
-    const hdy = Math.sin(this.heading);
+    // 尾鳍（贴身，先画）
+    const tl = SEGS - 1;
+    const swayT = Math.sin(this.phase + 0.6) * 0.35;
+    const tipx = this.px[tl] - dxs[tl] * this.L * 0.17 - nxs[tl] * swayT * this.L * 0.05;
+    const tipy = this.py[tl] - dys[tl] * this.L * 0.17 - nys[tl] * swayT * this.L * 0.05;
+    const wT = this.L * WIDTH_F[tl] * 1.9;
+    g.poly([this.px[tl] + nxs[tl] * wT, this.py[tl] + nys[tl] * wT, tipx, tipy, this.px[tl] - nxs[tl] * wT, this.py[tl] - nys[tl] * wT]).fill(this.coat.fin);
+
+    // 胸鳍（身下，只露梢）
+    const pi = 3;
+    const wP = this.L * WIDTH_F[pi];
+    const pA = Math.atan2(dys[pi], dxs[pi]);
     for (const side of [-1, 1]) {
-      const bx = this.px[3] - hdy * side * this.size * 0.35;
-      const by = this.py[3] + hdx * side * this.size * 0.35;
-      const a = this.heading + side * (1.9 + Math.sin(this.phase * 1.1 + side) * 0.25);
-      g.poly([bx, by, bx + Math.cos(a) * this.size * 0.4, by + Math.sin(a) * this.size * 0.4, bx + Math.cos(a + 0.7 * side) * this.size * 0.32, by + Math.sin(a + 0.7 * side) * this.size * 0.32]).fill(this.coat.fin);
+      const bx = this.px[pi] + nxs[pi] * side * wP * 0.85;
+      const by = this.py[pi] + nys[pi] * side * wP * 0.85;
+      const a = pA + side * 2.35 + Math.sin(this.phase * 1.2 + side) * 0.18;
+      g.poly([
+        bx, by,
+        bx + Math.cos(a) * this.L * 0.11, by + Math.sin(a) * this.L * 0.11,
+        bx + Math.cos(a + side * 0.55) * this.L * 0.09, by + Math.sin(a + side * 0.55) * this.L * 0.09,
+      ]).fill(this.coat.fin);
     }
 
-    // 花斑
-    if (this.coat.patch) {
+    // 身体轮廓：吻端 + 右缘 + 左缘（反向），一次填色描边
+    const pts: number[] = [];
+    pts.push(this.px[0] + dxs[0] * this.L * 0.055, this.py[0] + dys[0] * this.L * 0.055);
+    for (let i = 0; i < SEGS; i++) pts.push(this.px[i] + nxs[i] * this.L * WIDTH_F[i], this.py[i] + nys[i] * this.L * WIDTH_F[i]);
+    for (let i = SEGS - 1; i >= 0; i--) pts.push(this.px[i] - nxs[i] * this.L * WIDTH_F[i], this.py[i] - nys[i] * this.L * WIDTH_F[i]);
+    g.poly(pts).fill(this.coat.body).stroke({ color: this.coat.edge, width: 1, alpha: 0.4 });
+
+    // 脊线阴影：给平面轮廓一点体积感
+    g.moveTo(this.px[1], this.py[1]);
+    for (let i = 2; i < SEGS - 1; i++) g.lineTo(this.px[i], this.py[i]);
+    g.stroke({ color: this.coat.edge, width: this.L * 0.05, alpha: 0.12, cap: 'round' });
+
+    // 花斑：沿脊柱的有机斑块（两圆重叠成不规则形，微透）
+    if (this.coat.patches) {
       for (const p of this.patches) {
-        const i = Math.min(SEGS - 2, p.seg);
-        const rr = this.size * 0.5 * PROFILE[i] * p.r;
-        const nx = -(this.py[i + 1] - this.py[i]);
-        const ny = this.px[i + 1] - this.px[i];
-        const nl = Math.hypot(nx, ny) || 1;
-        g.circle(this.px[i] + (nx / nl) * p.off * rr, this.py[i] + (ny / nl) * p.off * rr, rr).fill(this.coat.patch);
+        const i = Math.min(SEGS - 2, Math.max(0, Math.round(p.u * (SEGS - 1))));
+        const w = this.L * WIDTH_F[i];
+        const rr = w * p.r;
+        const cx = this.px[i] + nxs[i] * p.side * w * 0.55;
+        const cy = this.py[i] + nys[i] * p.side * w * 0.55;
+        const col = this.coat.patches[p.ci];
+        g.circle(cx, cy, rr).fill({ color: col, alpha: 0.88 });
+        g.circle(cx + dxs[i] * rr * 0.6, cy + dys[i] * rr * 0.6, rr * 0.72).fill({ color: col, alpha: 0.88 });
       }
     }
 
     // 眼睛
+    const er = Math.max(1.2, this.L * 0.018);
+    const ex0 = this.px[0] + dxs[0] * this.L * 0.02;
+    const ey0 = this.py[0] + dys[0] * this.L * 0.02;
     for (const side of [-1, 1]) {
-      g.circle(
-        this.px[0] + hdx * this.size * 0.18 - hdy * side * this.size * 0.16,
-        this.py[0] + hdy * this.size * 0.18 + hdx * side * this.size * 0.16,
-        this.size * 0.06,
-      ).fill('#26332c');
+      g.circle(ex0 + nxs[0] * side * this.L * WIDTH_F[0] * 0.55, ey0 + nys[0] * side * this.L * WIDTH_F[0] * 0.55, er).fill('#23282b');
     }
   }
 }
@@ -187,7 +266,7 @@ export class School {
     }
   }
 
-  update(dt: number, t: number, cursor: { x: number; y: number } | null, W: number, H: number) {
-    for (const f of this.fishes) f.update(dt, t, cursor, this.fishes, W, H);
+  update(dt: number, t: number, cursor: { x: number; y: number } | null, W: number, H: number, wake?: (x: number, y: number) => void) {
+    for (const f of this.fishes) f.update(dt, t, cursor, this.fishes, W, H, wake);
   }
 }

@@ -2,12 +2,15 @@
 import { Texture } from 'pixi.js';
 
 export const PALETTE = {
-  light: '#a7cbb9',
-  mid: '#7fab97',
-  deep: '#578877',
-  ink: '#2e4a40',
-  pebbles: ['#b8ae97', '#a99f89', '#c6bca6', '#8f8873'],
+  light: '#a8bca6',
+  mid: '#86a289',
+  deep: '#6c8873',
+  ink: '#3c4f41',
+  pebbles: ['#b6b3a0', '#a6a696', '#c0bca9', '#97978a'],
 };
+
+// 主水面色的数值形式（给水色罩 tint 用）
+export const WATER_TINT = 0x86a289;
 
 function mulberry32(seed: number) {
   return () => {
@@ -33,35 +36,44 @@ export function makeBottomTexture(w = 1600, h = 1024): Texture {
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
 
-  // 大块水彩渍：明暗交替的柔和椭圆
+  // 大块水彩渍：明暗交替的柔和长斑
   for (let i = 0; i < 14; i++) {
     const x = rnd() * w;
     const y = rnd() * h;
     const r = 180 + rnd() * 320;
     const dark = rnd() > 0.5;
     const rg = g.createRadialGradient(x, y, 0, x, y, r);
-    rg.addColorStop(0, dark ? 'rgba(46,74,64,0.10)' : 'rgba(220,235,226,0.12)');
+    rg.addColorStop(0, dark ? 'rgba(60,79,65,0.09)' : 'rgba(226,236,224,0.10)');
     rg.addColorStop(1, 'rgba(0,0,0,0)');
     g.fillStyle = rg;
     g.beginPath();
-    g.ellipse(x, y, r, r * (0.6 + rnd() * 0.5), rnd() * Math.PI, 0, Math.PI * 2);
+    g.ellipse(x, y, r, r * (0.35 + rnd() * 0.45), rnd() * Math.PI, 0, Math.PI * 2);
     g.fill();
   }
 
-  // 鹅卵石
-  for (let i = 0; i < 110; i++) {
+  // 沉水的叶影大斑（比卵石更定义池底质感）
+  for (let i = 0; i < 7; i++) {
     const x = rnd() * w;
     const y = rnd() * h;
-    const r = 5 + rnd() * 16;
-    g.globalAlpha = 0.35 + rnd() * 0.3;
+    const rx = 200 + rnd() * 240;
+    const rg = g.createRadialGradient(x, y, 0, x, y, rx);
+    rg.addColorStop(0, 'rgba(40,60,48,0.10)');
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = rg;
+    g.beginPath();
+    g.ellipse(x, y, rx, rx * (0.4 + rnd() * 0.3), rnd() * Math.PI, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  // 鹅卵石：稀疏、半沉、不规则
+  for (let i = 0; i < 46; i++) {
+    const x = rnd() * w;
+    const y = rnd() * h;
+    const r = 6 + rnd() * 18;
+    g.globalAlpha = 0.14 + rnd() * 0.14;
     g.fillStyle = PALETTE.pebbles[(rnd() * PALETTE.pebbles.length) | 0];
     g.beginPath();
-    g.ellipse(x, y, r, r * (0.7 + rnd() * 0.3), rnd() * Math.PI, 0, Math.PI * 2);
-    g.fill();
-    g.globalAlpha = 0.22;
-    g.fillStyle = '#ffffff';
-    g.beginPath();
-    g.ellipse(x - r * 0.3, y - r * 0.35, r * 0.35, r * 0.2, 0, 0, Math.PI * 2);
+    g.ellipse(x, y, r * (0.8 + rnd() * 0.6), r * (0.6 + rnd() * 0.3), rnd() * Math.PI, 0, Math.PI * 2);
     g.fill();
     g.globalAlpha = 1;
   }
@@ -69,7 +81,7 @@ export function makeBottomTexture(w = 1600, h = 1024): Texture {
   // 边缘暗角
   const vg = g.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.75);
   vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(46,74,64,0.35)');
+  vg.addColorStop(1, 'rgba(60,79,65,0.28)');
   g.fillStyle = vg;
   g.fillRect(0, 0, w, h);
 
