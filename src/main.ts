@@ -5,6 +5,13 @@ import { Water } from './water';
 import { School } from './fish';
 import { Lilies } from './lily';
 import { Critters } from './critters';
+import { bboxCrop, cropCanvas, cutoutCanvas, splitComponents, tex } from './cutout';
+import koiUrl from './assets/koi.jpg';
+import leafUrl from './assets/leaf.jpg';
+import lotusUrl from './assets/lotus.jpg';
+import tadUrl from './assets/tadpoles.jpg';
+import frogUrl from './assets/frog.jpg';
+import dflyUrl from './assets/dragonfly.jpg';
 
 const cfg = loadConfig();
 
@@ -21,9 +28,29 @@ app.ticker.maxFPS = cfg.fps;
 
 const bottom = new Sprite(makeBottomTexture());
 const water = new Water();
-const school = new School(cfg.fish);
-const lilies = new Lilies();
-const critters = new Critters();
+
+// 素材抠图（一次性）：白底水墨册页 → 透明贴图
+const loadImg = (url: string) =>
+  new Promise<HTMLImageElement>((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = rej;
+    im.src = url;
+  });
+const [koiI, leafI, lotusI, tadI, frogI, dflyI] = await Promise.all(
+  [koiUrl, leafUrl, lotusUrl, tadUrl, frogUrl, dflyUrl].map(loadImg),
+);
+const koiTex = tex(bboxCrop(cutoutCanvas(koiI)));
+const leafTex = tex(bboxCrop(cutoutCanvas(leafI, { x: 0.12, y: 0.22, w: 0.76, h: 0.55 })));
+// 荷花白瓣与纸底同色、抠图会漏，改走 multiply 混合：白融进水、粉尖墨线显形
+const lotusTex = tex(cropCanvas(lotusI, { x: 0.24, y: 0.14, w: 0.52, h: 0.46 }));
+const frogTex = tex(bboxCrop(cutoutCanvas(frogI)));
+const dflyTex = tex(bboxCrop(cutoutCanvas(dflyI)));
+const tadArts = splitComponents(cutoutCanvas(tadI)).map((c) => ({ tex: tex(c.cv), forward: c.forward }));
+
+const school = new School(koiTex, cfg.fish);
+const lilies = new Lilies(leafTex, lotusTex, frogTex);
+const critters = new Critters(tadArts, dflyTex);
 // 水色罩：薄薄一层水色压在鱼和荷叶上，让它们"沉"在水里
 const veil = new Sprite(Texture.WHITE);
 veil.tint = WATER_TINT;
@@ -93,7 +120,7 @@ app.ticker.add((tk) => {
     layout(W, H);
   }
   water.step(dt);
-  school.update(dt, T, cursor, W, H, wake);
+  school.update(dt, T, cursor, W, H);
   lilies.update(dt, T, wake);
   critters.update(dt, T, W, H, wake);
   fogs.forEach((f, i) => {

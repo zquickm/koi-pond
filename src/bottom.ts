@@ -129,30 +129,6 @@ export function makeBottomTexture(w = 1600, h = 1024): Texture {
     g.fillRect(x - r, y - r, r * 2, r * 2);
   }
 
-  // 墨点鱼苗：中央水面的极小墨痕
-  for (let i = 0; i < 14; i++) {
-    const x = w * (0.18 + rnd() * 0.64);
-    const y = h * (0.18 + rnd() * 0.64);
-    const a = rnd() * Math.PI;
-    const l = 5 + rnd() * 5;
-    g.save();
-    g.translate(x, y);
-    g.rotate(a);
-    g.fillStyle = 'rgba(46,68,67,0.5)';
-    g.beginPath();
-    g.ellipse(0, 0, l, l * 0.32, 0, 0, Math.PI * 2);
-    g.fill();
-    g.strokeStyle = 'rgba(46,68,67,0.4)';
-    g.lineWidth = 1.2;
-    g.beginPath();
-    g.moveTo(-l, 0);
-    g.lineTo(-l * 1.8, -l * 0.35);
-    g.moveTo(-l, 0);
-    g.lineTo(-l * 1.8, l * 0.35);
-    g.stroke();
-    g.restore();
-  }
-
   return Texture.from(cv);
 }
 
