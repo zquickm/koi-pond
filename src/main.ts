@@ -5,6 +5,9 @@ import { Water } from './water';
 import { School } from './fish';
 import { Frog } from './lily';
 import { Critters } from './critters';
+import { FoodLayer } from './food';
+import { DayTint } from './daycycle';
+import { ClockWidget } from './widget';
 import { bboxCrop, cutoutCanvas, rotateToHeadLeft, splitComponents, tex } from './cutout';
 import koi1Url from './assets/koi-1.png';
 import koi3Url from './assets/koi-3.png';
@@ -18,6 +21,10 @@ import tadUrl from './assets/tadpoles.jpg';
 import dflyUrl from './assets/dragonfly.jpg';
 
 const cfg = loadConfig();
+const nowHour = () => {
+  const d = new Date();
+  return d.getHours() + d.getMinutes() / 60;
+};
 
 const app = new Application();
 await app.init({
@@ -72,6 +79,8 @@ const tadArts = splitComponents(cutoutCanvas(tadI), { headRule: 'wide-half' }).m
 const school = new School(koiTexs, cfg.fish);
 const frog = new Frog(frogTex);
 const critters = new Critters(tadArts, dflyTex);
+const foodLayer = new FoodLayer();
+const dayTint = new DayTint();
 // 水色罩：薄薄一层水色压在鱼上，让它们"沉"进画里
 const veil = new Sprite(Texture.WHITE);
 veil.tint = WATER_TINT;
@@ -84,7 +93,18 @@ const fogs = [0, 1, 2].map((i) => {
   s.alpha = 0.05 + i * 0.008;
   return s;
 });
-app.stage.addChild(bottom, school.shadows, school.layer, frog.sp, veil, water.highlight, ...fogs, critters.air);
+app.stage.addChild(
+  bottom,
+  school.shadows,
+  school.layer,
+  foodLayer.container,
+  frog.sp,
+  veil,
+  dayTint.sp,
+  water.highlight,
+  ...fogs,
+  critters.air,
+);
 
 // 光标：浏览器与独立壳走 pointer 事件；macOS 钉桌面壳 D5 改 CGEvent 轮询注入，接口不变
 let cursor: { x: number; y: number } | null = null;
@@ -101,6 +121,18 @@ document.addEventListener('mouseleave', () => (cursor = null));
 // 涟漪回调：r/s 可选强度（鱼尾波小圈，蛙鸣/蜻蜓点水大圈）
 const wake = (x: number, y: number, r = 1.1, s = 0.12) => water.drop(x / app.screen.width, y / app.screen.height, r, s);
 
+// —— 投喂：悬停水面 1.6s 自动撒食；点击也撒（WE/Lively 的点击通道兼容）——
+let hoverT = 0;
+const lastHover = { x: -99, y: -99 };
+let feedCd = 0;
+function feedAt(x: number, y: number) {
+  if (feedCd > 0) return;
+  feedCd = 3.5;
+  foodLayer.spawn(x, Math.min(y + 40, app.screen.height - 50), 4);
+  wake(x / app.screen.width, y / app.screen.height, 1.8, 0.35);
+}
+window.addEventListener('pointerdown', (e) => feedAt(e.clientX, e.clientY));
+
 function layout(W: number, H: number) {
   const bw = bottom.texture.width;
   const bh = bottom.texture.height;
@@ -115,6 +147,7 @@ function layout(W: number, H: number) {
   }));
   veil.width = W;
   veil.height = H;
+  dayTint.layout(W, H);
   for (const f of fogs) {
     f.width = W * 1.1;
     f.height = H * 0.8;
@@ -133,11 +166,36 @@ app.ticker.add((tk) => {
     lastH = H;
     layout(W, H);
   }
+  // 悬停撒食：光标在水面基本不动 1.6s → 撒一撮
+  feedCd -= dt;
+  if (cursor) {
+    if (Math.hypot(cursor.x - lastHover.x, cursor.y - lastHover.y) < 14) hoverT += dt;
+    else {
+      hoverT = 0;
+      lastHover.x = cursor.x;
+      lastHover.y = cursor.y;
+    }
+    if (hoverT > 1.6 && feedCd <= 0) {
+      hoverT = 0;
+      feedAt(cursor.x, cursor.y);
+    }
+  } else {
+    hoverT = 0;
+  }
+
   water.step(dt);
-  school.update(dt, T, cursor, W, H);
+  foodLayer.update(dt, W, H, wake);
+  school.update(dt, T, cursor, W, H, foodLayer.foods, wake);
   frog.update(dt, T, wake);
-  critters.update(dt, T, W, H, wake);  fogs.forEach((f, i) => {
+  critters.update(dt, T, W, H, wake);
+  // 昼夜：?hour=22 可强制预览
+  dayTint.update(cfg.hour ?? nowHour());
+  fogs.forEach((f, i) => {
     f.x = W * (0.5 + 0.28 * Math.sin(T * 0.021 + i * 2.1));
     f.y = H * (0.5 + 0.3 * Math.sin(T * 0.017 + i * 1.7));
   });
 });
+
+// 时钟/农历小组件（DOM 水印式，右上角）
+const widget = new ClockWidget();
+widget.start(cfg.hour);

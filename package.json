@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "lunar-javascript": "^1.7.7",
     "pixi.js": "^8.6.6"
   },
   "devDependencies": {
@@ -16,6 +17,8 @@
     "vite": "^7.1.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

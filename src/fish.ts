@@ -2,6 +2,7 @@
 // 每尾独立 waveFreq/waveLen/waveEnv 渲染波 + swimCycle 随速加快 + cruise 突进滑行
 // + turnBias 漫游 + 200px 怕人逃离 + 游泳区域多边形（避开原画山石/荷叶）+ 撞墙反射兜底。
 import { Container, MeshRope, Point, Sprite, Texture } from 'pixi.js';
+import type { Food } from './food';
 
 const ROPE_N = 18;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -87,6 +88,7 @@ export class Fish {
   private turnBias = 0;
   private turnBiasTarget = (Math.random() - 0.5) * 0.2;
   private turnBiasTimer = 1.5 + Math.random() * 2.5;
+  private fedTimer = 0;
 
   constructor(koi: Texture, W = 1600, H = 1000) {
     // 绳厚度恒等于贴图高度（MeshRope 规矩），故脊柱坐标全用贴图像素，靠容器缩放到目标体长
@@ -113,7 +115,17 @@ export class Fish {
     this.shadow.scale.set(this.bodyLenPx / 50);
   }
 
-  update(dt: number, t: number, cursor: { x: number; y: number } | null, others: Fish[], W: number, H: number) {
+  update(
+    dt: number,
+    t: number,
+    cursor: { x: number; y: number } | null,
+    others: Fish[],
+    W: number,
+    H: number,
+    foods: Food[] | null = null,
+    wake?: (nx: number, ny: number, r?: number, s?: number) => void,
+  ) {
+    this.fedTimer = Math.max(0, this.fedTimer - dt);
     // —— 期望转向 / 期望速度 ——
     let desiredTurn = 0;
     let desiredSpeed = this.baseSpeed;
@@ -169,6 +181,28 @@ export class Fish {
       }
     }
 
+    // —— 觅食（fish-d）：460px 内锁定最近食粒，2.4× 速度冲刺；吃到后短暂满足 ——
+    let target: Food | null = null;
+    let targetD = Infinity;
+    if (this.fedTimer <= 0 && foods && !fleeing) {
+      for (const f of foods) {
+        if (f.dead) continue;
+        const d = Math.hypot(f.x - this.x, f.y - this.y);
+        if (d < targetD) {
+          targetD = d;
+          target = f;
+        }
+      }
+      if (target && targetD < 460) {
+        desiredTurn = clamp(wrapAngle(Math.atan2(target.y - this.y, target.x - this.x) - this.heading) * 2.6, -1.45, 1.45);
+        const near = clamp((targetD - 14) / 110, 0.34, 1);
+        desiredSpeed = this.baseSpeed * 2.4 * near;
+        speedResp = 4.5;
+      } else {
+        target = null;
+      }
+    }
+
     // —— 游泳区域：靠近边界平滑转向内，出界强拉回（替代屏幕四边探针）——
     const zone = zoneDist(this.x, this.y, W, H);
     const SOFT = 42;
@@ -216,6 +250,13 @@ export class Fish {
       this.turnRate = 0;
     }
 
+    // —— 进食判定 ——
+    if (target && !target.dead && Math.hypot(target.x - this.x, target.y - this.y) < 26) {
+      target.dead = true;
+      this.fedTimer = 0.9;
+      wake?.(target.x / W, target.y / H, 1.6, 0.35);
+    }
+
     // 摆尾节拍随速度（fish-d：swimCycle += (1.45 + speed_px_per_frame*4.5)*dt）
     this.swimCycle += (1.45 + (this.speed / 60) * 4.5) * dt;
 
@@ -254,7 +295,7 @@ export class School {
     }
   }
 
-  update(dt: number, t: number, cursor: { x: number; y: number } | null, W: number, H: number) {
-    for (const f of this.fishes) f.update(dt, t, cursor, this.fishes, W, H);
+  update(dt: number, t: number, cursor: { x: number; y: number } | null, W: number, H: number, foods: Food[] | null = null, wake?: (nx: number, ny: number, r?: number, s?: number) => void) {
+    for (const f of this.fishes) f.update(dt, t, cursor, this.fishes, W, H, foods, wake);
   }
 }
