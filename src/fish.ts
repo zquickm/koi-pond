@@ -1,12 +1,53 @@
 // 素材锦鲤 × MeshRope，运动模型移植自 fish-d 参考实现（MIT, github 锦鲤池塘项目）：
 // 每尾独立 waveFreq/waveLen/waveEnv 渲染波 + swimCycle 随速加快 + cruise 突进滑行
-// + turnBias 漫游 + 200px 怕人逃离 + 探针避边（最强威胁覆盖漫游）+ 撞墙反射朝向。
-// 绳脊柱坐标用贴图像素，容器缩放到目标体长。
+// + turnBias 漫游 + 200px 怕人逃离 + 游泳区域多边形（避开原画山石/荷叶）+ 撞墙反射兜底。
 import { Container, MeshRope, Point, Sprite, Texture } from 'pixi.js';
 
 const ROPE_N = 18;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+
+/** 游泳区域（背景原画的开阔水面，比例坐标，顺时针）。鱼只在多边形内活动。 */
+const ZONE: [number, number][] = [
+  [0.28, 0.06], [0.7, 0.04], [0.84, 0.16], [0.93, 0.4], [0.9, 0.7], [0.74, 0.77],
+  [0.7, 0.93], [0.42, 0.94], [0.38, 0.7], [0.24, 0.56], [0.13, 0.4], [0.24, 0.14],
+];
+const ZONE_CX = ZONE.reduce((s, p) => s + p[0], 0) / ZONE.length;
+const ZONE_CY = ZONE.reduce((s, p) => s + p[1], 0) / ZONE.length;
+
+/** 到区域边界的最近距离与内向指引（指向区域质心，近凸多边形下等价于内向） */
+function zoneDist(px: number, py: number, W: number, H: number): { d: number; nx: number; ny: number } {
+  const pts = ZONE.map(([x, y]) => [x * W, y * H]);
+  let inside = false;
+  let best = Infinity;
+  let qx = px;
+  let qy = py;
+  for (let i = 0; i < pts.length; i++) {
+    const [ax, ay] = pts[i];
+    const [bx, by] = pts[(i + 1) % pts.length];
+    if (ay > py !== by > py && px < ((bx - ax) * (py - ay)) / (by - ay) + ax) inside = !inside;
+    const ex = bx - ax;
+    const ey = by - ay;
+    const len2 = ex * ex + ey * ey || 1;
+    const t = clamp(((px - ax) * ex + (py - ay) * ey) / len2, 0, 1);
+    const cx2 = ax + ex * t;
+    const cy2 = ay + ey * t;
+    const d = Math.hypot(px - cx2, py - cy2);
+    if (d < best) {
+      best = d;
+      qx = cx2;
+      qy = cy2;
+    }
+  }
+  const cx = ZONE_CX * W;
+  const cy = ZONE_CY * H;
+  let nx = cx - qx;
+  let ny = cy - qy;
+  const nl = Math.hypot(nx, ny) || 1;
+  nx /= nl;
+  ny /= nl;
+  return { d: inside ? best : -best, nx, ny };
+}
 
 let shadowTex: Texture | null = null;
 function getShadowTex(): Texture {
@@ -55,7 +96,7 @@ export class Fish {
     }
     this.mesh = new MeshRope({ texture: koi, points: this.pts });
     this.container.addChild(this.mesh);
-    this.s = (100 + Math.random() * 50) / koi.width;
+    this.s = (80 + Math.random() * 40) / koi.width;
     this.container.scale.set(this.s);
     this.container.alpha = 0.72 + Math.random() * 0.28; // 深浅层次
     this.bodyLenPx = koi.width * this.s;
@@ -63,8 +104,9 @@ export class Fish {
     this.waveEnv = koi.width * (0.1 + Math.random() * 0.05);
     this.heading = Math.random() * Math.PI * 2;
     this.speed = this.baseSpeed;
-    this.x = W * (0.2 + Math.random() * 0.6);
-    this.y = H * (0.2 + Math.random() * 0.6);
+    // 出生点取区域质心附近的随机散布，避免开局压在山石上
+    this.x = (ZONE_CX + (Math.random() - 0.5) * 0.4) * W;
+    this.y = (ZONE_CY + (Math.random() - 0.5) * 0.4) * H;
     this.container.position.set(this.x, this.y);
     this.shadow.anchor.set(0.5);
     this.shadow.alpha = 0.26;
@@ -72,39 +114,13 @@ export class Fish {
   }
 
   update(dt: number, t: number, cursor: { x: number; y: number } | null, others: Fish[], W: number, H: number) {
-    // —— 边界威胁探针（fish-d consider）：取最强的一侧 ——
-    const fx = Math.cos(this.heading);
-    const fy = Math.sin(this.heading);
-    const safeMargin = Math.max(50, this.bodyLenPx);
-    // 最小转弯半径 = 2.5×体长（fish-d turnRadius），探距与它挂钩才能提前转
-    const minimumTurnRadius = this.bodyLenPx * 2.5;
-    const probeDistance = Math.max(minimumTurnRadius * 1.15, this.speed * 0.9);
-    let threat = 0;
-    let inwardX = 0;
-    let inwardY = 0;
-    const consider = (room: number, comp: number, ix: number, iy: number) => {
-      if (comp <= 0.02) return;
-      const tt = (room - safeMargin) / (comp * probeDistance);
-      if (tt < 1) {
-        const w = 1 - Math.max(0, tt);
-        if (w > threat) {
-          threat = w;
-          inwardX = ix;
-          inwardY = iy;
-        }
-      }
-    };
-    consider(W - this.x, fx, -1, 0);
-    consider(this.x, -fx, 1, 0);
-    consider(H - this.y, fy, 0, -1);
-    consider(this.y, -fy, 0, 1);
-    const edgeThreat = clamp(threat, 0, 1);
-
-    // —— 怕人：200px 内掉头逃离（覆盖其他行为）——
+    // —— 期望转向 / 期望速度 ——
     let desiredTurn = 0;
     let desiredSpeed = this.baseSpeed;
     let speedResp = 1.8;
     let fleeing = false;
+
+    // 怕人：200px 内掉头逃离（覆盖其他行为）
     if (cursor) {
       const dx = this.x - cursor.x;
       const dy = this.y - cursor.y;
@@ -117,12 +133,8 @@ export class Fish {
       }
     }
 
-    // —— 边缘行为：强转向内、覆盖漫游（fish-d：威胁 >0.04 即接管）——
-    if (edgeThreat > 0.04 && !fleeing) {
-      desiredTurn = clamp(wrapAngle(Math.atan2(inwardY, inwardX) - this.heading) * 3, -1.45, 1.45);
-      desiredSpeed = this.baseSpeed * (1 - edgeThreat * 0.2);
-    } else if (!fleeing) {
-      // —— 漫游：转向偏置缓变 + 突进-滑行节律 ——
+    if (!fleeing) {
+      // 漫游：转向偏置缓变 + 突进-滑行节律
       this.turnBiasTimer -= dt;
       if (this.turnBiasTimer <= 0) {
         this.turnBiasTarget = (Math.random() - 0.5) * 0.26;
@@ -133,7 +145,7 @@ export class Fish {
       this.burstPhase += dt * this.burstRate;
       desiredSpeed = this.baseSpeed * (0.78 + 0.34 * (0.5 + 0.5 * Math.sin(this.burstPhase)));
 
-      // 同伴分离：私人空间按双方体长定（edge 时跳过，fish-d 同款）
+      // 同伴分离：私人空间按双方体长定
       let sepX = 0;
       let sepY = 0;
       let sepP = 0;
@@ -157,25 +169,33 @@ export class Fish {
       }
     }
 
-    // —— 转向动力学（fish-d 核心）：角速度上限 = min(行为上限, 速度/转弯半径)。
-    // 转弯必须与速度几何相容，大弧慢转才是锦鲤的从容；行为上限：巡航 1.15 / 逃离 1.6 ——
+    // —— 游泳区域：靠近边界平滑转向内，出界强拉回（替代屏幕四边探针）——
+    const zone = zoneDist(this.x, this.y, W, H);
+    const SOFT = 42;
+    if (zone.d < SOFT) {
+      const w = zone.d <= 0 ? 1 : 1 - zone.d / SOFT;
+      const turnToIn = wrapAngle(Math.atan2(zone.ny, zone.nx) - this.heading) * 3;
+      desiredTurn = desiredTurn * (1 - w) + clamp(turnToIn, -1.45, 1.45) * w;
+      desiredSpeed *= 1 - 0.25 * w;
+    }
+
+    // —— 转向动力学（fish-d 核心）：角速度上限 = min(行为上限, 速度/转弯半径) ——
+    const minimumTurnRadius = this.bodyLenPx * 2.5;
     const speedPerSecond = Math.max(this.speed, this.baseSpeed * 0.42);
     const maxTurn = Math.min(fleeing ? 1.6 : 1.15, speedPerSecond / minimumTurnRadius);
     desiredTurn = clamp(desiredTurn, -maxTurn, maxTurn);
-    const turnAccel = 2.6;
+    const turnAccel = 4.0;
     this.turnRate += clamp(desiredTurn - this.turnRate, -turnAccel * dt, turnAccel * dt);
     this.turnRate = clamp(this.turnRate, -maxTurn, maxTurn);
     this.heading = wrapAngle(this.heading + this.turnRate * dt);
 
     // —— 速度动力学 ——
-    speedResp = desiredSpeed > this.speed ? 1.8 : 1.15;
-    if (fleeing) speedResp = 4.5;
     this.speed += (desiredSpeed - this.speed) * Math.min(1, speedResp * dt);
     this.speed = clamp(this.speed, this.baseSpeed * 0.42, this.baseSpeed * 3.2);
     this.x += Math.cos(this.heading) * this.speed * dt;
     this.y += Math.sin(this.heading) * this.speed * dt;
 
-    // —— 撞墙反射：位置钳回 + 朝向镜面反射 + 角速度清零（fish-d 同款，杜绝贴边滑）——
+    // —— 撞墙反射兜底（正常被区域约束时不会触发）——
     const B = 6;
     if (this.x < B) {
       this.x = B;
@@ -200,13 +220,13 @@ export class Fish {
     this.swimCycle += (1.45 + (this.speed / 60) * 4.5) * dt;
 
     // 渲染波：沿脊柱的正弦行波（waveEnv 波幅 / waveFreq 频率 / waveLen 波长，均逐尾随机），
-    // 尾梢 30% 额外鞭扫补足鱼尾摆度；转弯时身体向弯内倾
+    // 尾梢 30% 额外鞭扫；转弯时身体向弯内倾
     const texw = this.mesh.texture.width;
     const hw = texw / 2;
     const bendBase = -this.turnRate * 500;
     for (let i = 0; i < ROPE_N; i++) {
       const k = i / (ROPE_N - 1);
-      const extraTail = 1 + 0.6 * Math.max(0, (k - 0.7) / 0.3);
+      const extraTail = 1 + 0.45 * Math.max(0, (k - 0.7) / 0.3);
       this.pts[i].x = hw - k * texw;
       this.pts[i].y = Math.sin(this.swimCycle * this.waveFreq - k * this.waveLen) * this.waveEnv * k * k * extraTail + bendBase * k * k;
     }
@@ -214,8 +234,8 @@ export class Fish {
     this.container.position.set(this.x, this.y);
     // 素材已转为头朝 +x，游向 heading 直接对齐
     this.container.rotation = this.heading;
-    this.shadow.x = this.x + 10;
-    this.shadow.y = this.y + 18;
+    this.shadow.x = this.x + 8;
+    this.shadow.y = this.y + 14;
     this.shadow.rotation = this.heading;
   }
 }
