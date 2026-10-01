@@ -5,8 +5,8 @@ import { Water } from './water';
 import { School } from './fish';
 import { Lilies } from './lily';
 import { Critters } from './critters';
-import { bboxCrop, cropCanvas, cutoutCanvas, rotate90CCW, splitComponents, tex } from './cutout';
-import koiUrl from './assets/koi.jpg';
+import { bboxCrop, cropCanvas, cutoutCanvas, splitComponents, tex } from './cutout';
+import koiUrl from './assets/koi.png';
 import leafUrl from './assets/leaf.jpg';
 import lotusUrl from './assets/lotus.jpg';
 import tadUrl from './assets/tadpoles.jpg';
@@ -40,7 +40,8 @@ const loadImg = (url: string) =>
 const [koiI, leafI, lotusI, tadI, frogI, dflyI] = await Promise.all(
   [koiUrl, leafUrl, lotusUrl, tadUrl, frogUrl, dflyUrl].map(loadImg),
 );
-const koiTex = tex(rotate90CCW(bboxCrop(cutoutCanvas(koiI))));
+// 新鱼素材天生水平直身、头朝左：抠底+裁剪即可，无需旋转/拉直
+const koiTex = tex(bboxCrop(cutoutCanvas(koiI)));
 const leafTex = tex(bboxCrop(cutoutCanvas(leafI, { x: 0.12, y: 0.22, w: 0.76, h: 0.55 })));
 // 荷花白瓣与纸底同色、抠图会漏，改走 multiply 混合：白融进水、粉尖墨线显形
 const lotusTex = tex(cropCanvas(lotusI, { x: 0.24, y: 0.14, w: 0.52, h: 0.46 }));
