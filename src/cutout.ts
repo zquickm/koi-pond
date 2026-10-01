@@ -134,8 +134,15 @@ export interface Component {
   forward: number;
 }
 
-/** 连通域拆分（透明度通道），返回各主体画布与朝向（头向角，头=垂直主轴展宽更大的一端） */
-export function splitComponents(src: HTMLCanvasElement, minPixels = 600): Component[] {
+export interface SplitOptions {
+  minPixels?: number;
+  /** 头尾判定：wide-half=横向惯量大的一侧是头（蝌蚪）；narrow-tip=端梢展开小的一侧是头（锦鲤，尾鳍扇永远最宽） */
+  headRule?: 'wide-half' | 'narrow-tip';
+}
+
+/** 连通域拆分（透明度通道），返回各主体画布与朝向（头向角） */
+export function splitComponents(src: HTMLCanvasElement, options: SplitOptions = {}): Component[] {
+  const { minPixels = 600, headRule = 'wide-half' } = options;
   const w = src.width;
   const h = src.height;
   const d = src.getContext('2d')!.getImageData(0, 0, w, h).data;
@@ -202,18 +209,28 @@ export function splitComponents(src: HTMLCanvasElement, minPixels = 600): Compon
     const theta = 0.5 * Math.atan2(2 * xy, xx - yy);
     const ax = Math.cos(theta);
     const ay = Math.sin(theta);
-    // 头侧：垂直主轴方向惯量更大的一半
+    // 头尾判定：narrow-tip=端梢垂直展开小的一侧是头（锦鲤吻窄尾扇宽）；wide-half=垂向惯量大的一侧
+    let posSpread = 0;
+    let negSpread = 0;
     let posW = 0;
     let negW = 0;
+    let tMax = 1;
     for (let i = 0; i < n; i++) {
       const dx = pts[i * 2] - mx;
       const dy = pts[i * 2 + 1] - my;
       const t = dx * ax + dy * ay;
       const u = -dx * ay + dy * ax;
-      if (t >= 0) posW += u * u;
-      else negW += u * u;
+      const uu = u * u;
+      if (t >= 0) posW += uu;
+      else negW += uu;
+      tMax = Math.max(tMax, Math.abs(t));
+      if (Math.abs(t) > tMax * 0.86) {
+        if (t >= 0) posSpread = Math.max(posSpread, Math.abs(u));
+        else negSpread = Math.max(negSpread, Math.abs(u));
+      }
     }
-    const sign = posW >= negW ? 1 : -1;
+    const sign =
+      headRule === 'narrow-tip' ? (posSpread <= negSpread ? 1 : -1) : posW >= negW ? 1 : -1;
     // 裁出组件
     const cv = document.createElement('canvas');
     cv.width = x1 - x0 + 1;
@@ -221,6 +238,23 @@ export function splitComponents(src: HTMLCanvasElement, minPixels = 600): Compon
     cv.getContext('2d')!.drawImage(src, x0, y0, cv.width, cv.height, 0, 0, cv.width, cv.height);
     out.push({ cv, forward: Math.atan2(ay * sign, ax * sign) });
   }
+  return out;
+}
+
+/** 旋转组件画布使头朝向画布左缘（MeshRope 的 u=0 端） */
+export function rotateToHeadLeft(cv: HTMLCanvasElement, forward: number): HTMLCanvasElement {
+  const theta = Math.PI - forward;
+  const cos = Math.abs(Math.cos(theta));
+  const sin = Math.abs(Math.sin(theta));
+  const w = cv.width;
+  const h = cv.height;
+  const out = document.createElement('canvas');
+  out.width = Math.ceil(w * cos + h * sin);
+  out.height = Math.ceil(w * sin + h * cos);
+  const g = out.getContext('2d')!;
+  g.translate(out.width / 2, out.height / 2);
+  g.rotate(theta);
+  g.drawImage(cv, -w / 2, -h / 2);
   return out;
 }
 

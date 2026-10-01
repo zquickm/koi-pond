@@ -5,8 +5,10 @@ import { Water } from './water';
 import { School } from './fish';
 import { Lilies } from './lily';
 import { Critters } from './critters';
-import { bboxCrop, cropCanvas, cutoutCanvas, splitComponents, tex } from './cutout';
-import koiUrl from './assets/koi.png';
+import { bboxCrop, cropCanvas, cutoutCanvas, rotateToHeadLeft, splitComponents, tex } from './cutout';
+import koi1Url from './assets/koi-1.png';
+import koi2Url from './assets/koi-2.png';
+import koi3Url from './assets/koi-3.png';
 import leafUrl from './assets/leaf.jpg';
 import lotusUrl from './assets/lotus.jpg';
 import tadUrl from './assets/tadpoles.jpg';
@@ -37,11 +39,16 @@ const loadImg = (url: string) =>
     im.onerror = rej;
     im.src = url;
   });
-const [koiI, leafI, lotusI, tadI, frogI, dflyI] = await Promise.all(
-  [koiUrl, leafUrl, lotusUrl, tadUrl, frogUrl, dflyUrl].map(loadImg),
+const [koiI1, koiI2, koiI3, leafI, lotusI, tadI, frogI, dflyI] = await Promise.all(
+  [koi1Url, koi2Url, koi3Url, leafUrl, lotusUrl, tadUrl, frogUrl, dflyUrl].map(loadImg),
 );
-// 新鱼素材天生水平直身、头朝左：抠底+裁剪即可，无需旋转/拉直
-const koiTex = tex(bboxCrop(cutoutCanvas(koiI)));
+// 三张素材都过连通域拆分：单尾图得 1 条，群鱼图拆出每条；统一转到头朝左
+const koiTexs: Texture[] = [];
+for (const im of [koiI1, koiI2, koiI3]) {
+  const cut = cutoutCanvas(im);
+  const comps = splitComponents(cut, { minPixels: cut.width * cut.height * 0.004, headRule: 'narrow-tip' });
+  for (const c of comps) koiTexs.push(tex(bboxCrop(rotateToHeadLeft(c.cv, c.forward))));
+}
 const leafTex = tex(bboxCrop(cutoutCanvas(leafI, { x: 0.12, y: 0.22, w: 0.76, h: 0.55 })));
 // 荷花白瓣与纸底同色、抠图会漏，改走 multiply 混合：白融进水、粉尖墨线显形
 const lotusTex = tex(cropCanvas(lotusI, { x: 0.24, y: 0.14, w: 0.52, h: 0.46 }));
@@ -49,7 +56,7 @@ const frogTex = tex(bboxCrop(cutoutCanvas(frogI)));
 const dflyTex = tex(bboxCrop(cutoutCanvas(dflyI)));
 const tadArts = splitComponents(cutoutCanvas(tadI)).map((c) => ({ tex: tex(c.cv), forward: c.forward }));
 
-const school = new School(koiTex, cfg.fish);
+const school = new School(koiTexs, cfg.fish);
 const lilies = new Lilies(leafTex, lotusTex, frogTex);
 const critters = new Critters(tadArts, dflyTex);
 // 水色罩：薄薄一层水色压在鱼和荷叶上，让它们"沉"在水里

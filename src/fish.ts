@@ -59,7 +59,7 @@ export class Fish {
     this.container.scale.set(this.s);
     this.container.alpha = 0.72 + Math.random() * 0.28; // 深浅层次
     this.bodyLenPx = koi.width * this.s;
-    this.baseSpeed = 24 + Math.random() * 24;
+    this.baseSpeed = 34 + Math.random() * 26;
     this.waveEnv = koi.width * (0.1 + Math.random() * 0.05);
     this.heading = Math.random() * Math.PI * 2;
     this.speed = this.baseSpeed;
@@ -76,7 +76,9 @@ export class Fish {
     const fx = Math.cos(this.heading);
     const fy = Math.sin(this.heading);
     const safeMargin = Math.max(50, this.bodyLenPx);
-    const probeDistance = Math.max(this.bodyLenPx * 0.92, this.speed * 0.9);
+    // 最小转弯半径 = 2.5×体长（fish-d turnRadius），探距与它挂钩才能提前转
+    const minimumTurnRadius = this.bodyLenPx * 2.5;
+    const probeDistance = Math.max(minimumTurnRadius * 1.15, this.speed * 0.9);
     let threat = 0;
     let inwardX = 0;
     let inwardY = 0;
@@ -101,7 +103,7 @@ export class Fish {
     // —— 怕人：200px 内掉头逃离（覆盖其他行为）——
     let desiredTurn = 0;
     let desiredSpeed = this.baseSpeed;
-    let speedResp = this.baseSpeed > 0 ? 1.8 : 1.8;
+    let speedResp = 1.8;
     let fleeing = false;
     if (cursor) {
       const dx = this.x - cursor.x;
@@ -155,8 +157,10 @@ export class Fish {
       }
     }
 
-    // —— 转向动力学：角加速度 2.6/s²、巡航 1.15 / 逃离 1.6 rad/s 上限 ——
-    const maxTurn = fleeing ? 1.6 : 1.15;
+    // —— 转向动力学（fish-d 核心）：角速度上限 = min(行为上限, 速度/转弯半径)。
+    // 转弯必须与速度几何相容，大弧慢转才是锦鲤的从容；行为上限：巡航 1.15 / 逃离 1.6 ——
+    const speedPerSecond = Math.max(this.speed, this.baseSpeed * 0.42);
+    const maxTurn = Math.min(fleeing ? 1.6 : 1.15, speedPerSecond / minimumTurnRadius);
     desiredTurn = clamp(desiredTurn, -maxTurn, maxTurn);
     const turnAccel = 2.6;
     this.turnRate += clamp(desiredTurn - this.turnRate, -turnAccel * dt, turnAccel * dt);
@@ -221,9 +225,9 @@ export class School {
   readonly layer = new Container();
   private fishes: Fish[] = [];
 
-  constructor(koi: Texture, count: number) {
+  constructor(texs: Texture[], count: number) {
     for (let i = 0; i < count; i++) {
-      const f = new Fish(koi);
+      const f = new Fish(texs[i % texs.length]);
       this.fishes.push(f);
       this.shadows.addChild(f.shadow);
       this.layer.addChild(f.container);
