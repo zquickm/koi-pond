@@ -58,8 +58,8 @@ function getShadowTex(): Texture {
   cv.height = 64;
   const g = cv.getContext('2d')!;
   const rg = g.createRadialGradient(32, 32, 2, 32, 32, 30);
-  rg.addColorStop(0, 'rgba(20,45,38,0.42)');
-  rg.addColorStop(1, 'rgba(20,45,38,0)');
+  rg.addColorStop(0, 'rgba(30,60,50,0.3)');
+  rg.addColorStop(1, 'rgba(30,60,50,0)');
   g.fillStyle = rg;
   g.fillRect(0, 0, 64, 64);
   shadowTex = Texture.from(cv);
@@ -111,7 +111,7 @@ export class Fish {
     this.y = (ZONE_CY + (Math.random() - 0.5) * 0.4) * H;
     this.container.position.set(this.x, this.y);
     this.shadow.anchor.set(0.5);
-    this.shadow.alpha = 0.26;
+    this.shadow.alpha = 0.17;
     this.shadow.scale.set(this.bodyLenPx / 50);
   }
 

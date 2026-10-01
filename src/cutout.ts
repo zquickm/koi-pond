@@ -85,6 +85,52 @@ export function cutoutCanvas(
   return cv;
 }
 
+/** 整体提亮：RGB 向白色按 k 混合（alpha 不变）——水墨素材做壁纸需要比画稿更浅一档 */
+export function washTowardWhite(cv: HTMLCanvasElement, k: number): HTMLCanvasElement {
+  const g = cv.getContext('2d', { willReadFrequently: true })!;
+  const id = g.getImageData(0, 0, cv.width, cv.height);
+  const d = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] += (255 - d[i]) * k;
+    d[i + 1] += (255 - d[i + 1]) * k;
+    d[i + 2] += (255 - d[i + 2]) * k;
+  }
+  g.putImageData(id, 0, 0);
+  return cv;
+}
+
+/** 色彩重映射到 fish-d 式青绿水色：冷色像素按亮度映射到"深teal↔浅aqua"渐变，
+ *  暖色（粉荷/红鲤斑）保留原色；strength 控制混合比例。 */
+export function regradeTeal(cv: HTMLCanvasElement, strength = 0.8): HTMLCanvasElement {
+  const g = cv.getContext('2d', { willReadFrequently: true })!;
+  const id = g.getImageData(0, 0, cv.width, cv.height);
+  const d = id.data;
+  const dkR = 0x1d;
+  const dkG = 0x5c;
+  const dkB = 0x5e;
+  const ltR = 0xe6;
+  const ltG = 0xf4;
+  const ltB = 0xec;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i];
+    const gg = d[i + 1];
+    const b = d[i + 2];
+    if (r > gg && r >= b) continue; // 暖色（花）保留
+    const L = (r * 0.299 + gg * 0.587 + b * 0.114) / 255;
+    // 对比度扩展 + smoothstep：暗部压到深 teal、亮部提到浅 aqua，还原 fish-d 的 tonal 反差
+    let Ln = Math.max(0, Math.min(1, (L - 0.16) / 0.62));
+    Ln = Ln * Ln * (3 - 2 * Ln);
+    const tr = dkR + (ltR - dkR) * Ln;
+    const tg = dkG + (ltG - dkG) * Ln;
+    const tb = dkB + (ltB - dkB) * Ln;
+    d[i] += (tr - d[i]) * strength;
+    d[i + 1] += (tg - d[i + 1]) * strength;
+    d[i + 2] += (tb - d[i + 2]) * strength;
+  }
+  g.putImageData(id, 0, 0);
+  return cv;
+}
+
 /** 只做相对裁剪（不抠底）——配合 multiply 混合用于白瓣荷花 */
 export function cropCanvas(
   img: HTMLImageElement | HTMLCanvasElement,

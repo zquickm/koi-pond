@@ -8,7 +8,7 @@ import { Critters } from './critters';
 import { FoodLayer } from './food';
 import { DayTint } from './daycycle';
 import { ClockWidget } from './widget';
-import { bboxCrop, cutoutCanvas, rotateToHeadLeft, splitComponents, tex } from './cutout';
+import { bboxCrop, cropCanvas, cutoutCanvas, regradeTeal, rotateToHeadLeft, splitComponents, tex, washTowardWhite } from './cutout';
 import koi1Url from './assets/koi-1.png';
 import koi3Url from './assets/koi-3.png';
 import bgV7Url from './assets/bg-v7.png';
@@ -48,12 +48,14 @@ const loadImg = (url: string) =>
 const [bgV7I, bgSpringI, bgSummerI, bgAutumnI, bgWinterI] = await Promise.all(
   [bgV7Url, bgSpringUrl, bgSummerUrl, bgAutumnUrl, bgWinterUrl].map(loadImg),
 );
+// 背景色调重映射到 fish-d 式青绿（亮度→teal 渐变），水墨纹理保留
+const bgWash = (im: HTMLImageElement) => tex(regradeTeal(washTowardWhite(cropCanvas(im, { x: 0, y: 0, w: 1, h: 1 }), 0.12), 0.78));
 const bgTexs: Record<string, Texture> = {
-  v7: Texture.from(bgV7I),
-  spring: Texture.from(bgSpringI),
-  summer: Texture.from(bgSummerI),
-  autumn: Texture.from(bgAutumnI),
-  winter: Texture.from(bgWinterI),
+  v7: bgWash(bgV7I),
+  spring: bgWash(bgSpringI),
+  summer: bgWash(bgSummerI),
+  autumn: bgWash(bgAutumnI),
+  winter: bgWash(bgWinterI),
 };
 const bottom = new Sprite(bgTexs[cfg.season] ?? bgTexs.v7);
 const water = new Water();
@@ -62,17 +64,17 @@ const water = new Water();
 const [koiI1, koiI3, tadI, frogI, dflyI] = await Promise.all(
   [koi1Url, koi3Url, tadUrl, frogUrl, dflyUrl].map(loadImg),
 );
-// 两张单尾直鱼素材，过连通域拆分统一转到头朝左
+// 两张单尾直鱼素材，过连通域拆分统一转到头朝左；鱼身提亮多一档（墨色变淡墨）
 const koiTexs: Texture[] = [];
 for (const im of [koiI1, koiI3]) {
   const cut = cutoutCanvas(im);
   const comps = splitComponents(cut, { minPixels: cut.width * cut.height * 0.004, headRule: 'narrow-tip' });
-  for (const c of comps) koiTexs.push(tex(bboxCrop(rotateToHeadLeft(c.cv, c.forward))));
+  for (const c of comps) koiTexs.push(tex(washTowardWhite(bboxCrop(rotateToHeadLeft(c.cv, c.forward)), 0.38)));
 }
-const frogTex = tex(bboxCrop(cutoutCanvas(frogI)));
-const dflyTex = tex(bboxCrop(cutoutCanvas(dflyI)));
+const frogTex = tex(washTowardWhite(bboxCrop(cutoutCanvas(frogI)), 0.15));
+const dflyTex = tex(washTowardWhite(bboxCrop(cutoutCanvas(dflyI)), 0.2));
 const tadArts = splitComponents(cutoutCanvas(tadI), { headRule: 'wide-half' }).map((c) => ({
-  tex: tex(c.cv),
+  tex: tex(washTowardWhite(c.cv, 0.2)),
   forward: c.forward,
 }));
 
@@ -84,7 +86,7 @@ const dayTint = new DayTint();
 // 水色罩：薄薄一层水色压在鱼上，让它们"沉"进画里
 const veil = new Sprite(Texture.WHITE);
 veil.tint = WATER_TINT;
-veil.alpha = 0.05;
+veil.alpha = 0.03;
 // 烟波雾层：缓慢漂移的纸白大团
 const fogTex = makeFogTexture();
 const fogs = [0, 1, 2].map((i) => {

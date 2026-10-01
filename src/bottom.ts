@@ -1,7 +1,7 @@
 // 池塘背景为手绘水墨原画（bg-*.png，含四季）；本文件只保留雾贴图与水色调。
 import { Texture } from 'pixi.js';
 
-export const WATER_TINT = 0xc9d6cc;
+export const WATER_TINT = 0x9fd0c4;
 
 /** 烟雾贴图（漂移雾层用） */
 export function makeFogTexture(): Texture {
