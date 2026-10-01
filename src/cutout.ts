@@ -210,11 +210,17 @@ export function splitComponents(src: HTMLCanvasElement, options: SplitOptions = 
     const ax = Math.cos(theta);
     const ay = Math.sin(theta);
     // 头尾判定：narrow-tip=端梢垂直展开小的一侧是头（锦鲤吻窄尾扇宽）；wide-half=垂向惯量大的一侧
+    // 两遍扫描：先求轴投影最大值，再只统计端梢带（|t|>0.86·tMax）内的展宽
     let posSpread = 0;
     let negSpread = 0;
     let posW = 0;
     let negW = 0;
-    let tMax = 1;
+    let tMax = 0;
+    for (let i = 0; i < n; i++) {
+      const dx = pts[i * 2] - mx;
+      const dy = pts[i * 2 + 1] - my;
+      tMax = Math.max(tMax, Math.abs(dx * ax + dy * ay));
+    }
     for (let i = 0; i < n; i++) {
       const dx = pts[i * 2] - mx;
       const dy = pts[i * 2 + 1] - my;
@@ -223,7 +229,6 @@ export function splitComponents(src: HTMLCanvasElement, options: SplitOptions = 
       const uu = u * u;
       if (t >= 0) posW += uu;
       else negW += uu;
-      tMax = Math.max(tMax, Math.abs(t));
       if (Math.abs(t) > tMax * 0.86) {
         if (t >= 0) posSpread = Math.max(posSpread, Math.abs(u));
         else negSpread = Math.max(negSpread, Math.abs(u));

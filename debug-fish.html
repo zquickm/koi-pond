@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>鱼素材朝向调试</title>
+    <style>
+      body { margin: 0; background: #e8e8e8; }
+    </style>
+  </head>
+  <body>
+    <script>
+      window.__errs = [];
+      window.addEventListener('error', (e) => window.__errs.push(e.message || String(e.error)));
+      window.addEventListener('unhandledrejection', (e) => window.__errs.push(String(e.reason)));
+    </script>
+    <script type="module" src="/src/debug-fish.ts"></script>
+  </body>
+</html>

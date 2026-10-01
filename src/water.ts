@@ -1,59 +1,20 @@
-// 水面：涟漪 = CPU 双缓冲波动方程（细网格、强阻尼、克制的扰动）；焦散 = 脉络纹理慢旋。
-// 审美基准：水面近乎静止，只有 interactions 的细波纹；忌大圈、忌亮环。
+// 水面：涟漪 = CPU 双缓冲波动方程（细网格、强阻尼、克制的扰动）。
+// 池塘底景已换成手绘水墨原画（自带焦散质感），本层只负责互动涟漪高光。
 // ponytail: CPU 网格 512×320（每帧 ~2ms，M4 富余）；要全屏位移折射时升级 GPU framebuffer，接口不变。
-import { Container, Sprite, Texture } from 'pixi.js';
+import { Sprite, Texture } from 'pixi.js';
 
 const SIM_W = 512;
 const SIM_H = 320;
 const DAMP = 0.956;
 const CREST_T = 0.045;
 
-function makeCausticTexture(): Texture {
-  const cv = document.createElement('canvas');
-  cv.width = 512;
-  cv.height = 512;
-  const g = cv.getContext('2d')!;
-  g.lineCap = 'round';
-  // 细脉络（焦散网）
-  for (let i = 0; i < 130; i++) {
-    const x = Math.random() * 512;
-    const y = Math.random() * 512;
-    const a = Math.random() * Math.PI * 2;
-    const len = 40 + Math.random() * 90;
-    g.strokeStyle = `rgba(255,255,248,${0.04 + Math.random() * 0.05})`;
-    g.lineWidth = 2 + Math.random() * 6;
-    g.beginPath();
-    g.moveTo(x, y);
-    g.quadraticCurveTo(x + Math.cos(a) * len * 0.5 + (Math.random() - 0.5) * 60, y + Math.sin(a) * len * 0.5 + (Math.random() - 0.5) * 60, x + Math.cos(a) * len, y + Math.sin(a) * len);
-    g.stroke();
-  }
-  // 宽软带（大尺度明暗）
-  for (let i = 0; i < 26; i++) {
-    const x = Math.random() * 512;
-    const y = Math.random() * 512;
-    const a = Math.random() * Math.PI * 2;
-    const len = 120 + Math.random() * 160;
-    g.strokeStyle = 'rgba(255,255,248,0.028)';
-    g.lineWidth = 14 + Math.random() * 14;
-    g.beginPath();
-    g.moveTo(x, y);
-    g.quadraticCurveTo(x + Math.cos(a) * len * 0.5 + (Math.random() - 0.5) * 80, y + Math.sin(a) * len * 0.5 + (Math.random() - 0.5) * 80, x + Math.cos(a) * len, y + Math.sin(a) * len);
-    g.stroke();
-  }
-  return Texture.from(cv);
-}
-
 export class Water {
-  readonly caustics = new Container();
   readonly highlight: Sprite;
-  private c1: Sprite;
-  private c2: Sprite;
   private cur = new Float32Array(SIM_W * SIM_H);
   private prev = new Float32Array(SIM_W * SIM_H);
   private cv: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private img: ImageData;
-  private t = 0;
   private nextAmbient = 18;
 
   constructor() {
@@ -66,26 +27,11 @@ export class Water {
     this.highlight = new Sprite(Texture.from(this.cv));
     this.highlight.blendMode = 'add';
     this.highlight.alpha = 0.36;
-
-    const n = makeCausticTexture();
-    this.c1 = new Sprite(n);
-    this.c1.blendMode = 'add';
-    this.c1.alpha = 0.035;
-    this.c2 = new Sprite(n);
-    this.c2.blendMode = 'add';
-    this.c2.alpha = 0.022;
-    this.caustics.addChild(this.c1, this.c2);
   }
 
   layout(W: number, H: number) {
     this.highlight.width = W;
     this.highlight.height = H;
-    for (const c of [this.c1, this.c2]) {
-      c.anchor.set(0.5);
-      c.width = W * 2.2;
-      c.height = H * 2.2;
-      c.position.set(W / 2, H / 2);
-    }
   }
 
   /** nx, ny ∈ [0,1]（归一化屏幕坐标）。默认小而轻。 */
@@ -101,7 +47,6 @@ export class Water {
   }
 
   step(dt: number) {
-    this.t += dt;
     this.nextAmbient -= dt;
     if (this.nextAmbient <= 0) {
       // 极罕见的偶发涟漪（一片落叶），轻到几乎注意不到
@@ -143,10 +88,5 @@ export class Water {
     this.ctx.putImageData(this.img, 0, 0);
     const src = this.highlight.texture.source as unknown as { update?: () => void };
     src.update?.();
-
-    this.c1.rotation += dt * 0.006;
-    this.c2.rotation -= dt * 0.0045;
-    this.c1.alpha = 0.033 + 0.005 * Math.sin(this.t * 0.3);
-    this.c2.alpha = 0.021 + 0.004 * Math.sin(this.t * 0.23 + 2);
   }
 }

@@ -1,13 +1,18 @@
-// 单一配置源。浏览器/独立壳走 URL 参数；WE/Lively 的 properties 注入 D6 接线，
-// 到时此文件追加 schema 定义并生成三端配置（project.json / livelyProperties.json / mac 面板）。
-export const defaults = { fish: 12, fps: 60 } as const;
+// 单一配置源。浏览器/独立壳走 URL 参数；WE/Lively 的 properties 注入 D6 接线。
+export const SEASONS = ['v7', 'spring', 'summer', 'autumn', 'winter'] as const;
+export type Season = (typeof SEASONS)[number];
 
-export type Config = { fish: number; fps: number };
+export const defaults = { fish: 12, fps: 60, season: 'v7' as Season };
+
+export type Config = { fish: number; fps: number; season: Season };
 
 export function loadConfig(): Config {
   const q = new URLSearchParams(location.search);
+  const seasonRaw = q.get('season');
+  const season = (SEASONS as readonly string[]).includes(seasonRaw ?? '') ? (seasonRaw as Season) : defaults.season;
   return {
     fish: Number(q.get('fish')) || defaults.fish,
     fps: Number(q.get('fps')) || defaults.fps,
+    season,
   };
 }
