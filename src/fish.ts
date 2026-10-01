@@ -2,7 +2,7 @@
 // 游动行为沿用：低通转向、滑行-加速、偶发窜游、避让光标与同伴。
 import { Container, MeshRope, Point, Sprite, Texture } from 'pixi.js';
 
-const ROPE_N = 14;
+const ROPE_N = 18;
 
 let shadowTex: Texture | null = null;
 function getShadowTex(): Texture {
@@ -100,22 +100,24 @@ export class Fish {
     this.y += Math.sin(this.heading) * sp * dt;
     this.x = Math.max(8, Math.min(W - 8, this.x));
     this.y = Math.max(8, Math.min(H - 8, this.y));
-    // 摆尾频率随速度；窜游时更快更狠
-    this.phase += dt * (3.4 + sp * 0.06);
+    // 摆尾频率：cruising ~1.5Hz，窜游 ~2.2Hz
+    this.phase += dt * (9 + sp * 0.15);
 
-    // 行波（贴图像素单位）：头端固定，摆幅向尾部平方递增；转弯时身体向弯内倾（尾滞后）
+    // 行波（贴图像素单位）：头端近定，幅值沿身体 k^1.7 递增到尾（≈体长 20%），
+    // 全身一个波长以内（-i*0.4）才像鱼；转弯时身体向弯内倾（尾滞后）
     // 脊柱沿贴图 X 轴：头在 +x（u=0 对应贴图左缘），尾在 -x；摆动即横向 y 偏移
     const hw = this.mesh.texture.width / 2;
-    const bendBase = -this.av * 320;
+    const amp = this.mesh.texture.width * 0.2;
+    const bendBase = -this.av * 380;
     for (let i = 0; i < ROPE_N; i++) {
       const k = i / (ROPE_N - 1);
       this.pts[i].x = hw - k * this.mesh.texture.width;
-      this.pts[i].y = Math.sin(this.phase - i * 0.72) * this.mesh.texture.width * 0.075 * k * k + bendBase * k * k;
+      this.pts[i].y = Math.sin(this.phase - i * 0.4) * amp * k ** 1.7 + bendBase * k * k;
     }
 
     this.container.position.set(this.x, this.y);
-    // 素材已转为头朝 +x，游向 heading 直接对齐
-    this.container.rotation = this.heading;
+    // 素材已转为头朝 +x，游向 heading 直接对齐；头部随摆尾微偏（真鱼头会反向轻摆）
+    this.container.rotation = this.heading + Math.sin(this.phase + Math.PI) * 0.045;
     this.shadow.x = this.x + 10;
     this.shadow.y = this.y + 18;
     this.shadow.rotation = this.heading;
