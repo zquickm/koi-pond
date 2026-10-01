@@ -7,7 +7,6 @@ import { Lilies } from './lily';
 import { Critters } from './critters';
 import { bboxCrop, cropCanvas, cutoutCanvas, rotateToHeadLeft, splitComponents, tex } from './cutout';
 import koi1Url from './assets/koi-1.png';
-import koi2Url from './assets/koi-2.png';
 import koi3Url from './assets/koi-3.png';
 import leafUrl from './assets/leaf.jpg';
 import lotusUrl from './assets/lotus.jpg';
@@ -39,12 +38,12 @@ const loadImg = (url: string) =>
     im.onerror = rej;
     im.src = url;
   });
-const [koiI1, koiI2, koiI3, leafI, lotusI, tadI, frogI, dflyI] = await Promise.all(
-  [koi1Url, koi2Url, koi3Url, leafUrl, lotusUrl, tadUrl, frogUrl, dflyUrl].map(loadImg),
+const [koiI1, koiI3, leafI, lotusI, tadI, frogI, dflyI] = await Promise.all(
+  [koi1Url, koi3Url, leafUrl, lotusUrl, tadUrl, frogUrl, dflyUrl].map(loadImg),
 );
-// 三张素材都过连通域拆分：单尾图得 1 条，群鱼图拆出每条；统一转到头朝左
+// 两张单尾直鱼素材，过连通域拆分统一转到头朝左
 const koiTexs: Texture[] = [];
-for (const im of [koiI1, koiI2, koiI3]) {
+for (const im of [koiI1, koiI3]) {
   const cut = cutoutCanvas(im);
   const comps = splitComponents(cut, { minPixels: cut.width * cut.height * 0.004, headRule: 'narrow-tip' });
   for (const c of comps) koiTexs.push(tex(bboxCrop(rotateToHeadLeft(c.cv, c.forward))));
