@@ -98,8 +98,8 @@ window.addEventListener('pointermove', (e) => {
 });
 document.addEventListener('mouseleave', () => (cursor = null));
 
-// 鱼尾波：传归一化坐标给水面
-const wake = (x: number, y: number) => water.drop(x / app.screen.width, y / app.screen.height, 1.1, 0.12);
+// 涟漪回调：r/s 可选强度（鱼尾波小圈，蛙鸣/蜻蜓点水大圈）
+const wake = (x: number, y: number, r = 1.1, s = 0.12) => water.drop(x / app.screen.width, y / app.screen.height, r, s);
 
 function layout(W: number, H: number) {
   const bw = bottom.texture.width;
@@ -108,7 +108,11 @@ function layout(W: number, H: number) {
   bottom.scale.set(s);
   bottom.position.set((W - bw * s) / 2, (H - bh * s) / 2);
   water.layout(W, H);
-  frog.layout(W, H);
+  // 蛙锚点用艺术图比例坐标 → 经背景 cover-fit 映射到屏幕
+  frog.layout(W, H, (fx, fy) => ({
+    x: bottom.x + bottom.scale.x * fx * bottom.texture.width,
+    y: bottom.y + bottom.scale.y * fy * bottom.texture.height,
+  }));
   veil.width = W;
   veil.height = H;
   for (const f of fogs) {
@@ -132,8 +136,7 @@ app.ticker.add((tk) => {
   water.step(dt);
   school.update(dt, T, cursor, W, H);
   frog.update(dt, T, wake);
-  critters.update(dt, T, W, H, wake);
-  fogs.forEach((f, i) => {
+  critters.update(dt, T, W, H, wake);  fogs.forEach((f, i) => {
     f.x = W * (0.5 + 0.28 * Math.sin(T * 0.021 + i * 2.1));
     f.y = H * (0.5 + 0.3 * Math.sin(T * 0.017 + i * 1.7));
   });
