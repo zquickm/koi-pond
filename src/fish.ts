@@ -1,8 +1,11 @@
-// 素材锦鲤 × MeshRope：贴图绑在 14 节脊柱点上，行波头定尾摆 + 转弯顺势内弯，真正的"甩尾"。
-// 游动行为沿用：低通转向、滑行-加速、偶发窜游、避让光标与同伴。
+// 素材锦鲤 × MeshRope，运动模型移植自 fish-d 参考实现（MIT, github 锦鲤池塘项目）：
+// 每尾独立 waveFreq/waveLen/waveEnv 渲染波 + swimCycle 随速加快 + cruise 突进滑行
+// + turnBias 漫游 + 200px 怕人逃离 + 转向/速度动力学限幅。绳脊柱坐标用贴图像素。
 import { Container, MeshRope, Point, Sprite, Texture } from 'pixi.js';
 
 const ROPE_N = 18;
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 let shadowTex: Texture | null = null;
 function getShadowTex(): Texture {
@@ -20,24 +23,28 @@ function getShadowTex(): Texture {
   return shadowTex;
 }
 
-function angDiff(a: number, b: number) {
-  return Math.atan2(Math.sin(a - b), Math.cos(a - b));
-}
-
 export class Fish {
   readonly container = new Container();
   readonly shadow = new Sprite(getShadowTex());
   private mesh: MeshRope;
   private pts: Point[] = [];
   private s: number;
+  private bodyLenPx: number;
   private x: number;
   private y: number;
   private heading: number;
-  private av = 0;
-  private phase = Math.random() * 10;
+  private turnRate = 0;
   private speed: number;
-  private dartT = 0;
-  private nextDart = 4 + Math.random() * 8;
+  private baseSpeed: number;
+  private swimCycle = Math.random() * Math.PI * 2;
+  private waveFreq = 1 + Math.random() * 0.55;
+  private waveLen = 4.3 + Math.random() * 2.3;
+  private waveEnv: number;
+  private burstRate = 0.3 + Math.random() * 0.35;
+  private burstPhase = Math.random() * Math.PI * 2;
+  private turnBias = 0;
+  private turnBiasTarget = (Math.random() - 0.5) * 0.2;
+  private turnBiasTimer = 1.5 + Math.random() * 2.5;
 
   constructor(koi: Texture, W = 1600, H = 1000) {
     // 绳厚度恒等于贴图高度（MeshRope 规矩），故脊柱坐标全用贴图像素，靠容器缩放到目标体长
@@ -49,75 +56,127 @@ export class Fish {
     this.container.addChild(this.mesh);
     this.s = (100 + Math.random() * 50) / koi.width;
     this.container.scale.set(this.s);
+    this.container.alpha = 0.72 + Math.random() * 0.28; // 深浅层次
+    this.bodyLenPx = koi.width * this.s;
+    this.baseSpeed = 24 + Math.random() * 24;
+    this.waveEnv = koi.width * (0.1 + Math.random() * 0.05);
     this.heading = Math.random() * Math.PI * 2;
-    this.speed = 22 + Math.random() * 12;
+    this.speed = this.baseSpeed;
     this.x = W * (0.2 + Math.random() * 0.6);
     this.y = H * (0.2 + Math.random() * 0.6);
     this.container.position.set(this.x, this.y);
     this.shadow.anchor.set(0.5);
     this.shadow.alpha = 0.26;
-    this.shadow.scale.set((koi.width * this.s) / 50);
+    this.shadow.scale.set(this.bodyLenPx / 50);
   }
 
   update(dt: number, t: number, cursor: { x: number; y: number } | null, others: Fish[], W: number, H: number) {
-    let steer = Math.sin(t * 0.13 + this.phase) * 0.3;
+    // —— 期望转向 / 期望速度（fish-d 行为模型）——
+    let desiredTurn = 0;
+    let desiredSpeed = this.baseSpeed;
+    let speedResp = 1.15;
+
+    // 漫游：转向偏置缓变 + 突进-滑行节律
+    this.turnBiasTimer -= dt;
+    if (this.turnBiasTimer <= 0) {
+      this.turnBiasTarget = (Math.random() - 0.5) * 0.26;
+      this.turnBiasTimer = 1.8 + Math.random() * 3.2;
+    }
+    this.turnBias += (this.turnBiasTarget - this.turnBias) * Math.min(1, dt / 1.25);
+    desiredTurn += this.turnBias;
+    this.burstPhase += dt * this.burstRate;
+    desiredSpeed = this.baseSpeed * (0.78 + 0.34 * (0.5 + 0.5 * Math.sin(this.burstPhase)));
+
+    // 怕人：200px 内掉头逃离（fish-d FEAR_RADIUS）
     if (cursor) {
       const dx = this.x - cursor.x;
       const dy = this.y - cursor.y;
-      const d = Math.hypot(dx, dy);
-      if (d < 130 && d > 1) steer += angDiff(Math.atan2(dy, dx), this.heading) * ((130 - d) / 130) * 1.4;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < 40000 && d2 > 1) {
+        const d = Math.sqrt(d2);
+        desiredTurn += wrapAngle(Math.atan2(dy, dx) - this.heading) * 2.7 * (1 - d / 200) * 2;
+        desiredSpeed = this.baseSpeed * 2.8;
+        speedResp = 4.5;
+      }
     }
+
+    // 同伴分离：私人空间按双方体长定
+    let sepX = 0;
+    let sepY = 0;
+    let sepP = 0;
     for (const o of others) {
       // ponytail: O(n²) 分离检测，鱼 >50 条时换空间哈希
       if (o === this) continue;
       const dx = this.x - o.x;
       const dy = this.y - o.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < 8100 && d2 > 1) {
-        const d = Math.sqrt(d2);
-        steer += angDiff(Math.atan2(dy, dx), this.heading) * (1 - d / 90) * 1.2;
+      const d = Math.hypot(dx, dy);
+      if (d < 0.001) continue;
+      const personal = (this.bodyLenPx + o.bodyLenPx) * 0.3;
+      if (d < personal) {
+        const pressure = 1 - d / personal;
+        sepX += (dx / d) * pressure;
+        sepY += (dy / d) * pressure;
+        sepP = Math.max(sepP, pressure);
       }
     }
-    const margin = 115; // 别游上边框山石
-    if (this.x < margin || this.x > W - margin || this.y < margin || this.y > H - margin) {
-      steer += angDiff(Math.atan2(H / 2 - this.y, W / 2 - this.x), this.heading) * 2.5;
+    if (sepP > 0.02) {
+      desiredTurn += wrapAngle(Math.atan2(sepY, sepX) - this.heading) * Math.min(1.45, sepP * 3);
     }
-    this.av += (steer - this.av) * Math.min(1, dt * 2.5);
-    this.heading += this.av * dt;
 
-    const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(t * 0.5 + this.phase)) ** 1.5;
-    let sp = this.speed * pulse;
-    this.nextDart -= dt;
-    if (this.nextDart <= 0) {
-      this.dartT = 0.8;
-      this.nextDart = 6 + Math.random() * 8;
-    }
-    if (this.dartT > 0) {
-      this.dartT -= dt;
-      sp *= 2.1;
-    }
-    this.x += Math.cos(this.heading) * sp * dt;
-    this.y += Math.sin(this.heading) * sp * dt;
-    this.x = Math.max(8, Math.min(W - 8, this.x));
-    this.y = Math.max(8, Math.min(H - 8, this.y));
-    // 摆尾频率：cruising ~1.5Hz，窜游 ~2.2Hz
-    this.phase += dt * (9 + sp * 0.15);
+    // 边界：沿朝向探头，威胁越大越早向内转并减速（fish-d consider 探针）
+    const fx = Math.cos(this.heading);
+    const fy = Math.sin(this.heading);
+    const probe = Math.max(90, this.speed * 2.2);
+    const margin = 40;
+    const consider = (room: number, comp: number, ix: number, iy: number) => {
+      if (comp <= 0.02) return;
+      const tt = (room - margin) / (comp * probe);
+      if (tt < 1) {
+        const w = 1 - Math.max(0, tt);
+        if (w > 0.04) {
+          desiredTurn += wrapAngle(Math.atan2(iy, ix) - this.heading) * 3 * w;
+          desiredSpeed *= 1 - w * 0.2;
+        }
+      }
+    };
+    consider(W - this.x, fx, -1, 0);
+    consider(this.x, -fx, 1, 0);
+    consider(H - this.y, fy, 0, -1);
+    consider(this.y, -fy, 0, 1);
 
-    // 行波（贴图像素单位）：头端近定，幅值沿身体 k^1.7 递增到尾（≈体长 20%），
-    // 全身一个波长以内（-i*0.4）才像鱼；转弯时身体向弯内倾（尾滞后）
-    // 脊柱沿贴图 X 轴：头在 +x（u=0 对应贴图左缘），尾在 -x；摆动即横向 y 偏移
-    const hw = this.mesh.texture.width / 2;
-    const amp = this.mesh.texture.width * 0.2;
-    const bendBase = -this.av * 380;
+    // 转向动力学：角加速度 2.6/s²、巡航角速度上限 1.15 rad/s（fish-d 同值）
+    desiredTurn = clamp(desiredTurn, -1.45, 1.45);
+    const turnAccel = 2.6;
+    this.turnRate += clamp(desiredTurn - this.turnRate, -turnAccel * dt, turnAccel * dt);
+    this.turnRate = clamp(this.turnRate, -1.15, 1.15);
+    this.heading = wrapAngle(this.heading + this.turnRate * dt);
+
+    // 速度动力学
+    this.speed += (desiredSpeed - this.speed) * Math.min(1, speedResp * dt);
+    this.speed = clamp(this.speed, this.baseSpeed * 0.42, this.baseSpeed * 3.2);
+    this.x += Math.cos(this.heading) * this.speed * dt;
+    this.y += Math.sin(this.heading) * this.speed * dt;
+    this.x = clamp(this.x, 8, W - 8);
+    this.y = clamp(this.y, 8, H - 8);
+
+    // 摆尾节拍随速度（fish-d：swimCycle += (1.45 + speed_px_per_frame*4.5)*dt）
+    this.swimCycle += (1.45 + (this.speed / 60) * 4.5) * dt;
+
+    // 渲染波：沿脊柱的正弦行波（waveEnv 波幅 / waveFreq 频率 / waveLen 波长，均逐尾随机），
+    // 尾梢 30% 额外鞭扫补足鱼尾摆度；转弯时身体向弯内倾
+    const texw = this.mesh.texture.width;
+    const hw = texw / 2;
+    const bendBase = -this.turnRate * 500;
     for (let i = 0; i < ROPE_N; i++) {
       const k = i / (ROPE_N - 1);
-      this.pts[i].x = hw - k * this.mesh.texture.width;
-      this.pts[i].y = Math.sin(this.phase - i * 0.4) * amp * k ** 1.7 + bendBase * k * k;
+      const extraTail = 1 + 0.6 * Math.max(0, (k - 0.7) / 0.3);
+      this.pts[i].x = hw - k * texw;
+      this.pts[i].y = Math.sin(this.swimCycle * this.waveFreq - k * this.waveLen) * this.waveEnv * k * k * extraTail + bendBase * k * k;
     }
 
     this.container.position.set(this.x, this.y);
-    // 素材已转为头朝 +x，游向 heading 直接对齐；头部随摆尾微偏（真鱼头会反向轻摆）
-    this.container.rotation = this.heading + Math.sin(this.phase + Math.PI) * 0.045;
+    // 素材已转为头朝 +x，游向 heading 直接对齐
+    this.container.rotation = this.heading;
     this.shadow.x = this.x + 10;
     this.shadow.y = this.y + 18;
     this.shadow.rotation = this.heading;
