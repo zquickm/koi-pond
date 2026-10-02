@@ -16,7 +16,6 @@ import koi1Url from './assets/koi-1.png';
 import koi3Url from './assets/koi-3.png';
 import bgDefaultUrl from './assets/bg-wallpaper-v8.png';
 import bgSpringUrl from './assets/bg-spring.png';
-import bgSummerUrl from './assets/bg-summer.png';
 import bgAutumnUrl from './assets/bg-autumn.png';
 import bgWinterUrl from './assets/bg-winter.png';
 import frogUrl from './assets/frog.jpg';
@@ -46,8 +45,8 @@ await app.init({
 document.body.appendChild(app.canvas);
 app.ticker.maxFPS = cfg.fps;
 
-// 池塘背景：手绘水墨原画（默认底图为用户新绘荷塘 bg-wallpaper-v8，另含四季），
-// ?season=spring|summer|autumn|winter 切换
+// 池塘背景：手绘水墨原画（默认底图为用户新绘荷塘 bg-wallpaper-v8，它就是夏景；另含春/秋/冬），
+// ?season=spring|autumn|winter 切换；?season=summer 归一到默认夏景（夏天就是默认）
 const loadImg = (url: string) =>
   new Promise<HTMLImageElement>((res, rej) => {
     const im = new Image();
@@ -55,16 +54,15 @@ const loadImg = (url: string) =>
     im.onerror = rej;
     im.src = url;
   });
-const [bgDefaultI, bgSpringI, bgSummerI, bgAutumnI, bgWinterI] = await Promise.all(
-  [bgDefaultUrl, bgSpringUrl, bgSummerUrl, bgAutumnUrl, bgWinterUrl].map(loadImg),
+const [bgDefaultI, bgSpringI, bgAutumnI, bgWinterI] = await Promise.all(
+  [bgDefaultUrl, bgSpringUrl, bgAutumnUrl, bgWinterUrl].map(loadImg),
 );
 // 背景色调重映射到 fish-d 式青绿（亮度→teal 渐变），水墨纹理保留
 const bgWash = (im: HTMLImageElement) => tex(regradeTeal(washTowardWhite(cropCanvas(im, { x: 0, y: 0, w: 1, h: 1 }), 0.12), 0.78));
 const bgTexs: Record<string, Texture> = {
-  // season id 仍沿用 'v7'（URL ?season=v7 与壳配置的既有取值），底图已换成 v8 荷塘
+  // season id 仍沿用 'v7'（URL ?season=v7 与壳配置的既有取值）；v7=默认荷塘=夏景，用原画不洗白
   v7: Texture.from(bgDefaultI),
   spring: bgWash(bgSpringI),
-  summer: bgWash(bgSummerI),
   autumn: bgWash(bgAutumnI),
   winter: bgWash(bgWinterI),
 };
@@ -133,9 +131,8 @@ if (calmWater) {
   dispBottom.scale.set(0);
   dispSchool.scale.set(0);
 }
-// 青蛙：默认荷塘底图就是夏天的场景，四季里的夏图（?season=summer）也算——
-// 只有这些夏景底图上有青蛙活动，春/秋/冬图没有；?frog=1 可在其他底图上强制预览。
-// 整套实现与落脚点标定都留在 lily.ts / pondzone.PERCHES 里，按底图显隐不重启。
+// 青蛙：默认荷塘就是夏景——只有夏景有青蛙活动，春/秋/冬图没有；
+// ?frog=1 可在其他季节底图上强制预览。实现与落脚点标定在 lily.ts / pondzone.PERCHES。
 const frog = new Frog(frogTex);
 const critters = new Critters(tadArts, dflyTex);
 const foodLayer = new FoodLayer();
@@ -328,13 +325,11 @@ app.ticker.add((tk) => {
 
   water.step(dt);
   if (!calmWater) stepGlints(dt, W, H); // 静水没有随机微波
-  // 蜻蜓：只在夏季（6–8 月）白天 7:00–18:30 活动；?dfly=1 强制预览
-  // 青蛙：跟夏景底图走（默认荷塘=夏天，?season=summer 同理），昼夜都出来（夜里鼓腮正是蛙鸣）；?frog=1 强制预览
+  // 夏天=默认荷塘（v7）：蜻蜓在夏景白天 7:00–18:30 造访（?dfly=1 强制预览）；
+  // 青蛙在夏景昼夜都出来（夜里鼓腮正是蛙鸣，?frog=1 强制预览）——同一套"夏天"定义
   const nfHour = cfg.hour ?? nowHour();
-  const month = new Date().getMonth() + 1;
-  const summer = month >= 6 && month <= 8;
-  const dflyOn = seasonQuery.has('dfly') || (summer && nfHour >= 7 && nfHour <= 18.5);
-  const summerScene = cfg.season === 'v7' || cfg.season === 'summer';
+  const summerScene = cfg.season === 'v7';
+  const dflyOn = seasonQuery.has('dfly') || (summerScene && nfHour >= 7 && nfHour <= 18.5);
   const frogOn = seasonQuery.has('frog') || summerScene;
   // 焦散推进：正午最亮、夜里只剩月光级光网（fish-d dayPhase causticMul 1.0↔0.22）
   const wxHour = cfg.hour ?? nowHour();

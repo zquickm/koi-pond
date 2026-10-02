@@ -39,9 +39,8 @@ const PERCH_SEEDS: readonly (readonly [number, number])[] = [
 ];
 
 export const ZONES: Record<string, Poly> = {
-  v7: WATER_DEFAULT,
+  v7: WATER_DEFAULT, // v7=默认荷塘=夏景（夏天就是默认）
   spring: FENCE_LEGACY,
-  summer: FENCE_LEGACY,
   autumn: FENCE_LEGACY,
   winter: FENCE_LEGACY,
 };
