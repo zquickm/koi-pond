@@ -400,7 +400,7 @@ export class Rainfall {
   private W = 800;
   private H = 600;
 
-  constructor(private count = 70) {
+  constructor(private count = 90) {
     this.container.addChild(this.g);
   }
 
@@ -439,10 +439,10 @@ export class Rainfall {
     for (const d of this.drops) {
       this.g.moveTo(d.x, d.y).lineTo(d.x - slope * d.len, d.y - d.len);
     }
-    // 深灰青雨丝：浅色画面上才可见（白雨丝会没进底色里）
-    this.g.stroke({ color: 0x5f7580, alpha: Math.min(1, 0.2 * k + 0.03), width: 1 });
+    // 深灰青雨丝：1.5px 半透明才在水彩底色上看得出（2026-10-03 反馈"雨看不清"）
+    this.g.stroke({ color: 0x5f7580, alpha: Math.min(1, 0.55 * k + 0.08), width: 1.5 });
     for (const s of this.splashes) this.g.circle(s.x, s.y, s.r);
-    this.g.stroke({ color: 0x5f7580, alpha: Math.min(1, 0.25 * k + 0.03), width: 1 });
+    this.g.stroke({ color: 0x5f7580, alpha: Math.min(1, 0.5 * k + 0.06), width: 1.5 });
   }
 
   private spawn() {
@@ -450,7 +450,7 @@ export class Rainfall {
       x: Math.random() * (this.W + 140) - 70,
       y: -20 - Math.random() * this.H,
       vy: 380 + Math.random() * 160,
-      len: 12 + Math.random() * 16,
+      len: 16 + Math.random() * 18,
       ty: Math.random() * this.H,
     };
   }
