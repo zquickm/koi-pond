@@ -59,17 +59,22 @@ const [bgDefaultI, bgSpringI, bgAutumnI, bgWinterI] = await Promise.all(
   [bgDefaultUrl, bgSpringUrl, bgAutumnUrl, bgWinterUrl].map(loadImg),
 );
 
-/** 冬季底图一次性烘焙：冬画（本身已画好冰湖雪景）+ 冰裂纹 + 荷叶/石头/草丛上缘的积雪盖。
+/** 冬季烘焙两张图：底图（冬画+积雪盖，进 bgTexs 走换季溶解）与冰层（冰膜+冰裂+霜斑，
+ *  单独一层盖在鱼之上——鱼在冰下，2026-10-03 反馈）。
  *  冰裂 = Voronoi 拼块分界线（真实湖冰的裂纹形态，2026-10-03 调研 Blender Artists/80.lv）：
  *  散点 → 相邻种子的中垂线段 → 抖动成微弯折线，"宽软反光底 + 主裂暗线 + 偏移高光棱"
- *  三层描边假深度，随机长次级枝裂；全部裁在标定水岸内、低透明度，不盖画的冰湖水色。
- *  旧预烘焙冰板（近不透明白板）已弃用——会盖掉新冬画的水色，见 9504ccd。 */
-function makeWinterTex(): Texture {
+ *  三层描边假深度，随机长次级枝裂；全部裁在标定水岸内、低透明度，不盖画的冰湖水色。 */
+function bakeWinterArt(): { base: Texture; ice: Texture } {
   const c = document.createElement('canvas');
   c.width = bgWinterI.width;
   c.height = bgWinterI.height;
   const g = c.getContext('2d')!;
   g.drawImage(bgWinterI, 0, 0);
+  // 冰层画布（透明底）：只装水面上那层东西
+  const iceC = document.createElement('canvas');
+  iceC.width = c.width;
+  iceC.height = c.height;
+  const gi = iceC.getContext('2d')!;
   // 固定种子的伪随机：烘焙结果稳定，刷新不换裂纹
   let seed = 20261003;
   const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
@@ -129,11 +134,14 @@ function makeWinterTex(): Texture {
       if (t0 < t1) edges.push({ x0: mx + nx * t0, y0: my + ny * t0, x1: mx + nx * t1, y1: my + ny * t1 });
     }
   }
-  g.save();
-  g.beginPath();
-  poly.forEach(([x, y], idx) => (idx ? g.lineTo(x, y) : g.moveTo(x, y)));
-  g.closePath();
-  g.clip();
+  gi.save();
+  gi.beginPath();
+  poly.forEach(([x, y], idx) => (idx ? gi.lineTo(x, y) : gi.moveTo(x, y)));
+  gi.closePath();
+  gi.clip();
+  // 冰膜：整片水面一层极淡的冷白——压在鱼身上，鱼自然显得在冰下
+  gi.fillStyle = 'rgba(233,242,250,0.09)';
+  gi.fillRect(0, 0, iceC.width, iceC.height);
   const jit = () => (rnd() - 0.5) * 2;
   for (const e of edges) {
     const len = Math.hypot(e.x1 - e.x0, e.y1 - e.y0);
@@ -152,18 +160,18 @@ function makeWinterTex(): Texture {
       const yc = (nodes[s][1] + nodes[s + 1][1]) / 2;
       path.quadraticCurveTo(nodes[s][0], nodes[s][1], xc, yc);
     }
-    g.strokeStyle = 'rgba(206,226,238,0.10)';
-    g.lineWidth = 5;
-    g.stroke(path); // 宽软底：裂纹下的反光带
-    g.strokeStyle = 'rgba(88,116,140,0.32)';
-    g.lineWidth = 1.2;
-    g.stroke(path); // 主裂暗线
-    g.save();
-    g.translate(1.1, -1.1);
-    g.strokeStyle = 'rgba(255,255,255,0.16)';
-    g.lineWidth = 0.8;
-    g.stroke(path); // 偏移高光棱：裂纹立体感
-    g.restore();
+    gi.strokeStyle = 'rgba(206,226,238,0.10)';
+    gi.lineWidth = 5;
+    gi.stroke(path); // 宽软底：裂纹下的反光带
+    gi.strokeStyle = 'rgba(88,116,140,0.32)';
+    gi.lineWidth = 1.2;
+    gi.stroke(path); // 主裂暗线
+    gi.save();
+    gi.translate(1.1, -1.1);
+    gi.strokeStyle = 'rgba(255,255,255,0.16)';
+    gi.lineWidth = 0.8;
+    gi.stroke(path); // 偏移高光棱：裂纹立体感
+    gi.restore();
     // 次级枝裂：从主裂中段斜出去的短细纹
     if (rnd() < 0.55) {
       const k = 0.3 + rnd() * 0.4;
@@ -181,9 +189,9 @@ function makeWinterTex(): Texture {
         bx + Math.cos(ang + bend) * bl,
         by + Math.sin(ang + bend) * bl,
       );
-      g.strokeStyle = 'rgba(110,138,160,0.2)';
-      g.lineWidth = 0.7;
-      g.stroke(bpath);
+      gi.strokeStyle = 'rgba(110,138,160,0.2)';
+      gi.lineWidth = 0.7;
+      gi.stroke(bpath);
     }
   }
   // 霜斑：几块极淡的白色薄膜，冰面的呼吸感
@@ -195,13 +203,13 @@ function makeWinterTex(): Texture {
       y = rnd() * c.height;
     } while (!inPoly(x, y));
     const r = 60 + rnd() * 120;
-    const grd = g.createRadialGradient(x, y, 0, x, y, r);
+    const grd = gi.createRadialGradient(x, y, 0, x, y, r);
     grd.addColorStop(0, 'rgba(246,250,254,0.05)');
     grd.addColorStop(1, 'rgba(246,250,254,0)');
-    g.fillStyle = grd;
-    g.fillRect(x - r, y - r, r * 2, r * 2);
+    gi.fillStyle = grd;
+    gi.fillRect(x - r, y - r, r * 2, r * 2);
   }
-  g.restore();
+  gi.restore();
   // 积雪盖：软白椭圆压在荷叶/石头/草丛的上缘（比例坐标取自 PERCH_SEEDS 一带的落点）
   const spots: [number, number, number][] = [
     // 左上莲叶群
@@ -231,16 +239,20 @@ function makeWinterTex(): Texture {
     g.fill();
     g.restore();
   }
-  return Texture.from(c);
+  return { base: Texture.from(c), ice: Texture.from(iceC) };
 }
+const winterBaked = bakeWinterArt();
 const bgTexs: Record<string, Texture> = {
   // season id 仍沿用 'v7'（URL ?season=v7 与壳配置的既有取值）；v7=默认荷塘=夏景。
   // 四季图与 v7 是同一构图的换季重绘，直接用原画不洗白——换季交叉溶解时色调才连得上。
   v7: Texture.from(bgDefaultI),
   spring: Texture.from(bgSpringI),
   autumn: Texture.from(bgAutumnI),
-  winter: makeWinterTex(),
+  winter: winterBaked.base,
 };
+// 冰层：盖在鱼之上（鱼在冰下），冬季才浮现，alpha 在 ticker 里跟换季溶解同步
+const iceLayer = new Sprite(winterBaked.ice);
+iceLayer.alpha = 0;
 const bottom = new Sprite(bgTexs[cfg.season] ?? bgTexs.v7);
 const bottomNext = new Sprite(); // 换季溶解：目标季图淡入，结束后落到底图
 bottomNext.alpha = 0;
@@ -271,6 +283,8 @@ function placeBottom(W: number, H: number) {
   const s = Math.max(W / bw, H / bh);
   pondLayer.scale.set(s);
   pondLayer.position.set((W - bw * s) / 2, (H - bh * s) / 2);
+  iceLayer.scale.set(s); // 冰层跟底图同一套 cover-fit
+  iceLayer.position.set((W - bw * s) / 2, (H - bh * s) / 2);
   pond.layout(pondLayer.x, pondLayer.y, s, bw, bh);
   redrawWater();
 }
@@ -357,6 +371,7 @@ app.stage.addChild(
   school.layer,
   foodLayer.container,
   frog.sp,
+  iceLayer, // 冰面：鱼/食/蛙都压在它下面（冬季鱼在冰下）
   veil,
   dayTint.sp,
   ...fogs,
@@ -551,6 +566,16 @@ app.ticker.add((tk) => {
       seasonNext = '';
     }
   }
+  // 冰层跟季节走：冬季=1；向冬溶解按进度升、离冬按进度降（与底图同步）
+  iceLayer.alpha = seasonNext
+    ? seasonNext === 'winter'
+      ? 1 - fadeLeft / SEASON_FADE
+      : seasonCur === 'winter'
+        ? fadeLeft / SEASON_FADE
+        : 0
+    : seasonCur === 'winter'
+      ? 1
+      : 0;
   // 悬停撒食已撤（2026-10-02）：只有点击才有食物
 
   water.step(dt);
