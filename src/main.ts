@@ -242,11 +242,31 @@ function bakeWinterArt(): { base: Texture; ice: Texture } {
   return { base: Texture.from(c), ice: Texture.from(iceC) };
 }
 const winterBaked = bakeWinterArt();
+/** 春图减绿（2026-10-03 反馈"春天太绿"）：画不能改，就在运行时轻校色——
+ *  各通道向自身亮度回撤 28%（整体降饱和），绿通道再多收 3.5%，鲜绿变成沉稳的灰绿。 */
+function softenGreen(im: HTMLImageElement): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = im.width;
+  c.height = im.height;
+  const g = c.getContext('2d')!;
+  g.drawImage(im, 0, 0);
+  const d = g.getImageData(0, 0, c.width, c.height);
+  const p = d.data;
+  for (let i = 0; i < p.length; i += 4) {
+    const l = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+    p[i] = p[i] + (l - p[i]) * 0.28;
+    p[i + 1] = (p[i + 1] + (l - p[i + 1]) * 0.28) * 0.965;
+    p[i + 2] = p[i + 2] + (l - p[i + 2]) * 0.28;
+  }
+  g.putImageData(d, 0, 0);
+  return c;
+}
+
 const bgTexs: Record<string, Texture> = {
   // season id 仍沿用 'v7'（URL ?season=v7 与壳配置的既有取值）；v7=默认荷塘=夏景。
   // 四季图与 v7 是同一构图的换季重绘，直接用原画不洗白——换季交叉溶解时色调才连得上。
   v7: Texture.from(bgDefaultI),
-  spring: Texture.from(bgSpringI),
+  spring: Texture.from(softenGreen(bgSpringI)),
   autumn: Texture.from(bgAutumnI),
   winter: winterBaked.base,
 };
