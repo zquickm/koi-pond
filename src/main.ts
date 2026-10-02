@@ -242,8 +242,9 @@ function bakeWinterArt(): { base: Texture; ice: Texture } {
   return { base: Texture.from(c), ice: Texture.from(iceC) };
 }
 const winterBaked = bakeWinterArt();
-/** 春图减绿（2026-10-03 反馈"春天太绿"）：画不能改，就在运行时轻校色——
- *  各通道向自身亮度回撤 28%（整体降饱和），绿通道再多收 3.5%，鲜绿变成沉稳的灰绿。 */
+/** 春图校色（2026-10-03 "太绿"→收完又说"要像夏天那样丰富"）：选择性彩度调整——
+ *  绿通道偏离亮度的部分收 8%（去绿火气），红/蓝偏离放大 18%（粉荷、水色更跳），
+ *  色相不变、构图纹理不动，出来的绿沉稳、别的颜色更丰富。 */
 function softenGreen(im: HTMLImageElement): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = im.width;
@@ -254,9 +255,9 @@ function softenGreen(im: HTMLImageElement): HTMLCanvasElement {
   const p = d.data;
   for (let i = 0; i < p.length; i += 4) {
     const l = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
-    p[i] = p[i] + (l - p[i]) * 0.28;
-    p[i + 1] = (p[i + 1] + (l - p[i + 1]) * 0.28) * 0.965;
-    p[i + 2] = p[i + 2] + (l - p[i + 2]) * 0.28;
+    p[i] = Math.max(0, Math.min(255, l + (p[i] - l) * 1.18));
+    p[i + 1] = Math.max(0, Math.min(255, l + (p[i + 1] - l) * 0.92));
+    p[i + 2] = Math.max(0, Math.min(255, l + (p[i + 2] - l) * 1.18));
   }
   g.putImageData(d, 0, 0);
   return c;
