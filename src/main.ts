@@ -352,14 +352,15 @@ app.ticker.add((tk) => {
   // 萤火虫：黄昏 18h 起随暮色渐显（初萤），凌晨 5.5h 前渐隐；冬季无萤（雪夜不出虫，2026-10-03 反馈）
   const nightK = Math.max(0, Math.min(1, nfHour >= 12 ? (nfHour - 18) / 1.2 : (5.5 - nfHour) / 1.2));
   fireflies.update(T, cfg.season === 'winter' ? 0 : nightK);
-  // 季节氛围：春/夏随机降雨（夏天小雨·大雨各半）/ 冬季随机降雪，每场约 1 分钟、间隔随机
+  // 季节氛围：春季小雨 / 夏季随机小雨·大雨 / 冬季随机降雪，每场约 1 分钟、间隔随机
   if (cfg.season === 'spring' || cfg.season === 'v7' || cfg.season === 'winter') {
     seasonT -= dt;
     if (seasonT <= 0 && seasonLeft <= 0) {
       seasonLeft = 55 + Math.random() * 15;
       seasonElapsed = 0;
       seasonT = 50 + Math.random() * 130;
-      rainPeak = cfg.season === 'v7' && Math.random() < 0.5 ? 0.4 : 1;
+      // 春天=小雨（2026-10-03 拍板）；夏天小雨·大雨各半
+      rainPeak = cfg.season === 'v7' ? (Math.random() < 0.5 ? 0.4 : 1) : 0.4;
     }
   }
   if (forceRain || forceSnow) seasonLeft = Math.max(seasonLeft, 60);

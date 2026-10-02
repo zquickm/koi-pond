@@ -391,11 +391,14 @@ export class Snowfall {
   }
 }
 
-/** 季节降雨（春季）：斜落的雨丝 + 落点水花圈；强度 k 由季节氛围场控制（渐入渐出） */
+/** 季节降雨（春·夏）：斜落雨丝 + 落点水花圈；强度 k 由季节氛围场控制（渐入渐出）。
+ *  真实感三件套：远/中/近三层景深（远的细短慢淡）、阵风摆动（倾角缓慢漂移，非恒定斜率）、
+ *  每滴自带随机偏摆。 */
 export class Rainfall {
   readonly container = new Container();
   private g = new Graphics();
-  private drops: { x: number; y: number; vy: number; len: number; ty: number }[] = [];
+  private t = 0; // 自走时钟：阵风用
+  private drops: { x: number; y: number; vy: number; len: number; ty: number; z: number; sway: number }[] = [];
   private splashes: { x: number; y: number; r: number; a: number }[] = [];
   private W = 800;
   private H = 600;
@@ -415,43 +418,57 @@ export class Rainfall {
   }
 
   update(dt: number, k: number, onSplash?: (nx: number, ny: number) => void) {
+    this.t += dt;
     this.g.clear();
     this.container.visible = k > 0.02 || this.splashes.length > 0;
     if (this.container.visible === false) return;
-    const slope = 0.16;
     const target = Math.round(this.count * k);
     while (this.drops.length < target) this.drops.push(this.spawn());
     if (this.drops.length > target) this.drops.length = target;
+    // 阵风：倾角缓慢漂移，偶尔小到接近垂直甚至微反向——真实的风不会匀速斜落
+    const gust = 0.13 + 0.08 * Math.sin(this.t * 0.21) + 0.05 * Math.sin(this.t * 0.53 + 1.7);
     for (const d of this.drops) {
       d.y += d.vy * dt;
-      d.x += d.vy * slope * dt;
+      d.x += d.vy * (gust + d.sway) * dt;
       if (d.y >= d.ty) {
-        this.splashes.push({ x: d.x, y: d.ty, r: 1, a: 0.55 * k });
+        this.splashes.push({ x: d.x, y: d.ty, r: 1, a: 0.6 * k });
         if (onSplash && Math.random() < 0.2) onSplash(d.x / this.W, d.ty / this.H);
         Object.assign(d, this.spawn());
       }
     }
     for (const s of this.splashes) {
-      s.r += 26 * dt;
-      s.a -= 2.2 * dt;
+      s.r += 34 * dt;
+      s.a -= 3.2 * dt;
     }
     this.splashes = this.splashes.filter((s) => s.a > 0);
-    for (const d of this.drops) {
-      this.g.moveTo(d.x, d.y).lineTo(d.x - slope * d.len, d.y - d.len);
+    // 三档景深各画一遍：远的细短淡，近的粗长浓（雨滴远近同现才有空间感）
+    const baseA = Math.min(1, 0.55 * k + 0.08);
+    const bands = [
+      { z0: 0, z1: 1 / 3, w: 1, am: 0.45 },
+      { z0: 1 / 3, z1: 2 / 3, w: 1.25, am: 0.7 },
+      { z0: 2 / 3, z1: 1.01, w: 1.5, am: 1 },
+    ];
+    for (const b of bands) {
+      for (const d of this.drops) {
+        if (d.z < b.z0 || d.z >= b.z1) continue;
+        this.g.moveTo(d.x, d.y).lineTo(d.x - (gust + d.sway) * d.len, d.y - d.len);
+      }
+      this.g.stroke({ color: 0x5f7580, alpha: Math.min(1, baseA * b.am), width: b.w });
     }
-    // 深灰青雨丝：1.5px 半透明才在水彩底色上看得出（2026-10-03 反馈"雨看不清"）
-    this.g.stroke({ color: 0x5f7580, alpha: Math.min(1, 0.55 * k + 0.08), width: 1.5 });
     for (const s of this.splashes) this.g.circle(s.x, s.y, s.r);
-    this.g.stroke({ color: 0x5f7580, alpha: Math.min(1, 0.5 * k + 0.06), width: 1.5 });
+    this.g.stroke({ color: 0x5f7580, alpha: Math.min(1, 0.5 * k + 0.06), width: 1.25 });
   }
 
   private spawn() {
+    const z = Math.random(); // 景深：0=远 1=近
     return {
       x: Math.random() * (this.W + 140) - 70,
       y: -20 - Math.random() * this.H,
-      vy: 380 + Math.random() * 160,
-      len: 16 + Math.random() * 18,
+      vy: 300 + z * 260 + Math.random() * 60,
+      len: 12 + z * 22 + Math.random() * 6,
       ty: Math.random() * this.H,
+      z,
+      sway: (Math.random() - 0.5) * 0.12,
     };
   }
 }
