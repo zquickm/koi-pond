@@ -133,10 +133,9 @@ if (calmWater) {
   dispBottom.scale.set(0);
   dispSchool.scale.set(0);
 }
-// 青蛙暂不出场（先不要）：整套实现与落脚点标定都留在 lily.ts / pondzone.PERCHES 里，
-// 想让它回来把这里改成 true 即可。
-const FROG_ENABLED = false;
-const frog = FROG_ENABLED ? new Frog(frogTex) : null;
+// 青蛙：只有夏季（6–8 月）才有青蛙的活动，与蜻蜓同一套月份开关；?frog=1 强制预览。
+// 整套实现与落脚点标定都留在 lily.ts / pondzone.PERCHES 里，按季显隐不重启。
+const frog = new Frog(frogTex);
 const critters = new Critters(tadArts, dflyTex);
 const foodLayer = new FoodLayer();
 const dayTint = new DayTint();
@@ -176,7 +175,7 @@ app.stage.addChild(
   school.shadows,
   school.layer,
   foodLayer.container,
-  ...(frog ? [frog.sp] : []),
+  frog.sp,
   veil,
   dayTint.sp,
   ...fogs,
@@ -224,7 +223,7 @@ function layout(W: number, H: number) {
   snowfall.layout(W, H);
   rainfall.layout(W, H);
   fireflies.layout(W, H);
-  frog?.layout(W, H, pond);
+  frog.layout(W, H, pond);
   veil.width = W;
   veil.height = H;
   dayTint.layout(W, H);
@@ -280,16 +279,14 @@ const audit = (() => {
   let frogBad = 0; // 落在不是岸上的点（=0 才对）
   return () => {
     frames++;
-    if (frog) {
-      const fr = frog.pose;
-      frogSpots = fr.spots;
-      if (fr.hops > frogHops) {
-        frogHops = fr.hops;
-        frogMinHop = Math.min(frogMinHop, fr.lastDist);
-        frogMaxHop = Math.max(frogMaxHop, fr.lastDist);
-      }
-      if (!fr.onLand) frogBad++;
+    const fr = frog.pose;
+    frogSpots = fr.spots;
+    if (fr.hops > frogHops) {
+      frogHops = fr.hops;
+      frogMinHop = Math.min(frogMinHop, fr.lastDist);
+      frogMaxHop = Math.max(frogMaxHop, fr.lastDist);
     }
+    if (!fr.onLand) frogBad++;
     for (const p of school.poses) {
       const q = pond.probe(p.x, p.y);
       const need = p.len * 0.6 + 10;
@@ -312,7 +309,7 @@ const audit = (() => {
       el.textContent =
         `audit frames=${frames} fish=${school.poses.length} minCenter=${minC.toFixed(1)} minBody=${minB.toFixed(1)}` +
         ` onLand=${onLand} breaches=${breaches} bucket=${bucket.join('/')}` +
-        (frog ? ` | frog spots=${frogSpots} hops=${frogHops} hopDist=${frogMinHop === Infinity ? '-' : frogMinHop.toFixed(0)}~${frogMaxHop.toFixed(0)} notOnLand=${frogBad}` : '');
+        ` | frog spots=${frogSpots} hops=${frogHops} hopDist=${frogMinHop === Infinity ? '-' : frogMinHop.toFixed(0)}~${frogMaxHop.toFixed(0)} notOnLand=${frogBad}`;
     }
   };
 })();
@@ -331,9 +328,12 @@ app.ticker.add((tk) => {
   water.step(dt);
   if (!calmWater) stepGlints(dt, W, H); // 静水没有随机微波
   // 蜻蜓：只在夏季（6–8 月）白天 7:00–18:30 活动；?dfly=1 强制预览
+  // 青蛙：只在夏季（6–8 月）活动，白天黑夜都出来（夜里鼓腮正是蛙鸣）；?frog=1 强制预览
   const nfHour = cfg.hour ?? nowHour();
   const month = new Date().getMonth() + 1;
-  const dflyOn = new URLSearchParams(location.search).has('dfly') || (month >= 6 && month <= 8 && nfHour >= 7 && nfHour <= 18.5);
+  const summer = month >= 6 && month <= 8;
+  const dflyOn = seasonQuery.has('dfly') || (summer && nfHour >= 7 && nfHour <= 18.5);
+  const frogOn = seasonQuery.has('frog') || summer;
   // 焦散推进：正午最亮、夜里只剩月光级光网（fish-d dayPhase causticMul 1.0↔0.22）
   const wxHour = cfg.hour ?? nowHour();
   const dayness = Math.max(0, Math.min(1, 1 - Math.abs(wxHour - 12) / 9));
@@ -344,7 +344,8 @@ app.ticker.add((tk) => {
   foodLayer.update(dt, W, H, wake);
   school.update(dt, T, cursor, W, H, foodLayer.foods, wake);
   audit?.();
-  frog?.update(dt, T, wake);
+  frog.setSeasonal(frogOn);
+  frog.update(dt, T, wake);
   critters.update(dt, T, W, H, wake, dflyOn);
   // 蜻蜓跟昼夜色调一起染（它在 dayTint 层之上，不染就会下午比四周亮）
   critters.air.tint = dayTint.sp.tint;

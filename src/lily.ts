@@ -30,11 +30,20 @@ export class Frog {
   private maxHop = 460;
   private hops = 0;
   private lastHopDist = 0;
+  private seasonalOn = false; // 夏季才出场（main.ts 按月份传入，同蜻蜓）
 
   constructor(frogTex: Texture) {
     this.tex = frogTex;
     this.sp.texture = frogTex;
     this.sp.anchor.set(0.5, 0.72);
+    this.sp.visible = false; // 出不出场等第一次 setSeasonal 决定
+  }
+
+  /** 季节开关：关闭时蹲着不动也不再显形；开着的首帧落回当前落脚点 */
+  setSeasonal(on: boolean) {
+    if (this.seasonalOn === on) return;
+    this.seasonalOn = on;
+    this.sp.visible = on;
   }
 
   layout(W: number, H: number, zone: PondZone | null) {
@@ -94,6 +103,7 @@ export class Frog {
   }
 
   update(dt: number, t: number, wake?: (nx: number, ny: number, r?: number, s?: number) => void) {
+    if (!this.seasonalOn) return;
     if (this.hopT >= 0) {
       this.hopT += dt;
       const k = Math.min(1, this.hopT / this.hopDur);
