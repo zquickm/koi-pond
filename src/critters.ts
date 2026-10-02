@@ -282,12 +282,13 @@ export class Fireflies {
  *
  *  统一规格——90 颗同尺寸(≈5px)、同浓淡、同一张硬边贴图：不分远近大小，不做模糊/渐隐，
  *  也不做透视放大，每颗从生到死都是同样一个小圆点。
- *  层次只留给"落水"：每颗飘到水面就消失，落点留一圈冷白融痕（落在岸上不化，接着往下飘）。 */
+ *  层次只留给"落水"：每颗飘到水面就消失，落点留一圈冷白融痕（落在岸上不化，接着往下飘）。
+ *  结冰时（frozen）不画扩散的圈，只留一个原地淡掉的小融点——冰面不该有波纹。 */
 const SNOW_SIZE = 5; // 圆点直径(px)
 const SNOW_ALPHA = 0.92;
 const SNOW_TINT = 0xf4faff; // 近乎白，只往冷里带一丝丝
 type Flake = { sp: Sprite; x: number; y: number; ty: number; vx: number; vy: number; ph: number; sw: number; life: number; ttl: number };
-type Melt = { x: number; y: number; r: number; v: number; a: number };
+type Melt = { x: number; y: number; r: number; v: number; a: number; dot: boolean };
 
 /** 圆点贴图：硬边实心白圆——只在最外 1px 做抗锯齿，整颗没有渐隐（反馈：雪不要模糊效果） */
 function snowDot(S = 64) {
@@ -307,6 +308,8 @@ function snowDot(S = 64) {
 
 export class Snowfall {
   readonly container = new Container();
+  /** 结冰的水面：落下的雪不再化成一圈圈波纹，只留一个慢慢淡掉的小融点 */
+  frozen = false;
   private g = new Graphics(); // 落水融痕（画在雪粒之下，贴着水面）
   private melts: Melt[] = [];
   private flakes: Flake[] = [];
@@ -343,7 +346,11 @@ export class Snowfall {
       // 飘到落点：在水面上化成一圈融痕，岸上则接着飘
       if (f.y >= f.ty) {
         if (!onLand || onLand(f.x / this.W, f.y / this.H)) {
-          this.melts.push({ x: f.x, y: f.y, r: 1, v: 16 + SNOW_SIZE * 1.7, a: 0.5 });
+          this.melts.push(
+            this.frozen
+              ? { x: f.x, y: f.y, r: 2.5, v: 0, a: 0.42, dot: true }
+              : { x: f.x, y: f.y, r: 1, v: 16 + SNOW_SIZE * 1.7, a: 0.5, dot: false },
+          );
           Object.assign(f, this.spawn());
         } else {
           f.ty += this.H * (0.15 + Math.random() * 0.35);
@@ -357,12 +364,14 @@ export class Snowfall {
     // 融痕：由小圈扩散、淡出（冷白，贴着水面）
     for (const m of this.melts) {
       m.r += m.v * dt;
-      m.a -= 0.8 * dt;
+      m.a -= (m.dot ? 0.5 : 0.8) * dt;
     }
     if (this.melts.length) this.melts = this.melts.filter((m) => m.a > 0);
     this.g.clear();
     for (const m of this.melts) {
-      this.g.circle(m.x, m.y, m.r).stroke({ color: 0xdce9fa, alpha: Math.min(0.55, m.a), width: 1 });
+      const style = { color: 0xdce9fa, alpha: Math.min(0.55, m.a) };
+      if (m.dot) this.g.circle(m.x, m.y, m.r).fill(style);
+      else this.g.circle(m.x, m.y, m.r).stroke({ ...style, width: 1 });
     }
   }
 
