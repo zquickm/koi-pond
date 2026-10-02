@@ -278,20 +278,15 @@ export class Fireflies {
   }
 }
 
-/** 季节降雪（冬季）：三层景深的白圆点，一路飘大，落到水面上化成融痕；k 控制强弱。
+/** 季节降雪（冬季）：统一的小白点（硬边），缓飘落到水面上化成融痕；k 控制强弱。
  *
- *  3D 感是三层叠出来的，不靠虚焦光晕（夜里那种发光扩散已经去掉）：
- *    · 分层——远景小、中景居中、近景大（都是硬边实心圆，不靠虚化），落速与摆幅随层变（50/34/16）；
- *    · 透视——每颗一边下落一边微微变大（1.0→1.25 左右），像朝镜头飘过来；
- *    · 落水——飘到水面就消失，落点画一圈冷白融痕，近景的圈更大更急；
- *      落在岸上不化，接着往下飘，等落到水面为止（所以不会在半空凭空消失）。
- *  圆点本身是硬边实心白圆，整颗不做模糊/渐隐。 */
+ *  统一规格——90 颗同尺寸(≈5px)、同浓淡、同一张硬边贴图：不分远近大小，不做模糊/渐隐，
+ *  也不做透视放大，每颗从生到死都是同样一个小圆点。
+ *  层次只留给"落水"：每颗飘到水面就消失，落点留一圈冷白融痕（落在岸上不化，接着往下飘）。 */
+const SNOW_SIZE = 5; // 圆点直径(px)
+const SNOW_ALPHA = 0.92;
 const SNOW_TINT = 0xf4faff; // 近乎白，只往冷里带一丝丝
-type Tier = 0 | 1 | 2;
-type Flake = {
-  sp: Sprite; x: number; y: number; y0: number; ty: number; vx: number; vy: number;
-  ph: number; sw: number; s: number; grow: number; a: number; tier: Tier; life: number; ttl: number;
-};
+type Flake = { sp: Sprite; x: number; y: number; ty: number; vx: number; vy: number; ph: number; sw: number; life: number; ttl: number };
 type Melt = { x: number; y: number; r: number; v: number; a: number };
 
 /** 圆点贴图：硬边实心白圆——只在最外 1px 做抗锯齿，整颗没有渐隐（反馈：雪不要模糊效果） */
@@ -321,8 +316,6 @@ export class Snowfall {
 
   constructor(private count = 90) {
     this.tex = Texture.from(snowDot());
-    this.container.sortableChildren = true; // 近的雪压住远的雪，景深才对
-    this.g.zIndex = -1;
     this.container.addChild(this.g);
   }
 
@@ -339,19 +332,18 @@ export class Snowfall {
       const f: Flake = { sp: new Sprite(this.tex), ...this.spawn() };
       f.sp.anchor.set(0.5);
       f.sp.tint = SNOW_TINT;
-      f.sp.zIndex = f.tier;
+      f.sp.scale.set(SNOW_SIZE / this.tex.width);
       this.container.addChild(f.sp);
       this.flakes.push(f);
     }
     for (const f of this.flakes) {
       f.life += dt;
-      f.x += (f.vx + Math.sin(t * (f.tier === 2 ? 0.34 : 0.62) + f.ph) * f.sw) * dt;
+      f.x += (f.vx + Math.sin(t * 0.62 + f.ph) * f.sw) * dt;
       f.y += f.vy * dt;
       // 飘到落点：在水面上化成一圈融痕，岸上则接着飘
       if (f.y >= f.ty) {
         if (!onLand || onLand(f.x / this.W, f.y / this.H)) {
-          const d = this.dispSize(f) ; // 当前直径(px)，融痕大小跟着它走——近处的雪落下圈更大
-          this.melts.push({ x: f.x, y: f.y, r: d * 0.18, v: 16 + d * 1.7, a: 0.5 });
+          this.melts.push({ x: f.x, y: f.y, r: 1, v: 16 + SNOW_SIZE * 1.7, a: 0.5 });
           Object.assign(f, this.spawn());
         } else {
           f.ty += this.H * (0.15 + Math.random() * 0.35);
@@ -359,10 +351,8 @@ export class Snowfall {
       } else if (f.life > f.ttl || f.y > this.H + 40 || f.x < -60 || f.x > this.W + 60) {
         Object.assign(f, this.spawn());
       }
-      const prog = Math.min(1, Math.max(0, (f.y - f.y0) / (f.ty - f.y0 || 1)));
       f.sp.position.set(f.x, f.y);
-      f.sp.alpha = k * f.a * Math.min(1, f.life * 1.6);
-      f.sp.scale.set((f.s * (1 + f.grow * prog) * 64) / this.tex.width);
+      f.sp.alpha = k * SNOW_ALPHA * Math.min(1, f.life * 1.6);
     }
     // 融痕：由小圈扩散、淡出（冷白，贴着水面）
     for (const m of this.melts) {
@@ -376,54 +366,16 @@ export class Snowfall {
     }
   }
 
-  /** 当前显示直径(px)：基础尺寸 × 透视放大 */
-  private dispSize(f: Flake) {
-    const prog = Math.min(1, Math.max(0, (f.y - f.y0) / (f.ty - f.y0 || 1)));
-    return f.s * (1 + f.grow * prog) * 64;
-  }
-
   private spawn(): Omit<Flake, 'sp'> {
-    const r = Math.random();
-    let tier: Tier;
-    let s: number;
-    let a: number;
-    let vy: number;
-    let sw: number;
-    if (r < 0.5) {
-      // 远景小雪：小、实、慢、几乎不摆
-      tier = 0;
-      s = 0.065 + Math.random() * 0.03;
-      a = 0.95;
-      vy = 12 + Math.random() * 6;
-      sw = 3;
-    } else if (r < 0.84) {
-      tier = 1;
-      s = 0.13 + Math.random() * 0.055;
-      a = 0.9;
-      vy = 18 + Math.random() * 9;
-      sw = 5;
-    } else {
-      // 近景：大、淡、快、摆幅大（离镜头近）
-      tier = 2;
-      s = 0.23 + Math.random() * 0.11;
-      a = 0.82;
-      vy = 28 + Math.random() * 14;
-      sw = 8;
-    }
     const y = Math.random() * this.H * 1.1 - this.H * 0.1;
     return {
       x: Math.random() * (this.W + 60) - 30,
       y,
-      y0: y,
       ty: y + this.H * (0.15 + Math.random() * 0.6), // 落点=水面上的随机深度
       vx: (Math.random() - 0.5) * 10,
-      vy,
+      vy: 13 + Math.random() * 8,
       ph: Math.random() * Math.PI * 2,
-      sw,
-      s,
-      grow: 0.18 + Math.random() * 0.12,
-      a,
-      tier,
+      sw: 4,
       life: 0,
       ttl: 30 + Math.random() * 30,
     };
