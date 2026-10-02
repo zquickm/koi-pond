@@ -19,18 +19,17 @@ import bgSpringUrl from './assets/bg-spring.png';
 import bgSummerUrl from './assets/bg-summer.png';
 import bgAutumnUrl from './assets/bg-autumn.png';
 import bgWinterUrl from './assets/bg-winter.png';
-import bgWinterIceUrl from './assets/bg-winter-ice.png'; // 冬季冰面（预烘焙，见 .dsh-demo/make_winter_ice.py）
 import frogUrl from './assets/frog.jpg';
 import tadUrl from './assets/tadpoles.jpg';
 import dflyUrl from './assets/dragonfly.jpg';
 
 const cfg = loadConfig();
-// ?rain=1 / ?snow=1 预览开关（可跨季节）；?noice=1 关掉冬季冰面（用来对比）
+// ?rain=1 / ?snow=1 / ?calm=1 预览开关（可跨季节）
 const seasonQuery = new URLSearchParams(location.search);
 const forceRain = seasonQuery.has('rain');
 const forceSnow = seasonQuery.has('snow');
-// 冬季湖面结冰：水面不再起波（无涟漪/焦散/折射），鱼在冰下、冰面在水之上
-const frozenSurface = cfg.season === 'winter' && !seasonQuery.has('noice');
+// ?calm=1：静水（不起涟漪、不晃、无焦散）——只是预览开关，四季默认都是活水
+const calmWater = seasonQuery.has('calm');
 const nowHour = () => {
   const d = new Date();
   return d.getHours() + d.getMinutes() / 60;
@@ -56,8 +55,8 @@ const loadImg = (url: string) =>
     im.onerror = rej;
     im.src = url;
   });
-const [bgDefaultI, bgSpringI, bgSummerI, bgAutumnI, bgWinterI, bgIceI] = await Promise.all(
-  [bgDefaultUrl, bgSpringUrl, bgSummerUrl, bgAutumnUrl, bgWinterUrl, bgWinterIceUrl].map(loadImg),
+const [bgDefaultI, bgSpringI, bgSummerI, bgAutumnI, bgWinterI] = await Promise.all(
+  [bgDefaultUrl, bgSpringUrl, bgSummerUrl, bgAutumnUrl, bgWinterUrl].map(loadImg),
 );
 // 背景色调重映射到 fish-d 式青绿（亮度→teal 渐变），水墨纹理保留
 const bgWash = (im: HTMLImageElement) => tex(regradeTeal(washTowardWhite(cropCanvas(im, { x: 0, y: 0, w: 1, h: 1 }), 0.12), 0.78));
@@ -72,8 +71,6 @@ const bgTexs: Record<string, Texture> = {
 const bottom = new Sprite(bgTexs[cfg.season] ?? bgTexs.v7);
 const pond = new PondZone(ZONES[cfg.season] ?? ZONES.v7, PERCHES[cfg.season] ?? []);
 const water = new Water();
-// 冬季冰面：与底图同尺寸的预烘焙叠加图，静态、没有波纹；只跟底图一起 cover-fit 摆放
-const ice = frozenSurface ? new Sprite(Texture.from(bgIceI)) : null;
 
 // 水感（只有 v8 底图逐点标定过）：整片水色比岸略深略冷，边缘模糊羽化——像洗染出来的，
 // 没有任何清晰的边界线。随 cover-fit 布局重画。
@@ -98,8 +95,6 @@ function placeBottom(W: number, H: number) {
   bottom.scale.set(s);
   bottom.position.set((W - bw * s) / 2, (H - bh * s) / 2);
   pond.layout(bottom.x, bottom.y, s, bw, bh);
-  ice?.scale.set(s);
-  ice?.position.set(bottom.x, bottom.y);
   redrawWater();
 }
 
@@ -133,8 +128,8 @@ bottom.filters = [dispBottom];
 const school = new School(koiTexs, cfg.fish, pond);
 const dispSchool = new DisplacementFilter({ sprite: water.waveMap, scale: 40 });
 school.layer.filters = [dispSchool];
-// 结冰的水面是平的：折射归零（水面不晃，冰下也就不用跟着晃）
-if (frozenSurface) {
+// 静水：折射归零（水面不晃）
+if (calmWater) {
   dispBottom.scale.set(0);
   dispSchool.scale.set(0);
 }
@@ -163,14 +158,14 @@ const caustics = new Caustics();
 const swells = new Caustics({ scale: 0.7, pow: 3.2, gain: 0.2, speed: 0.11, strength: 0.3 });
 const waterFx = new Container();
 waterFx.addChild(caustics.layer, swells.layer);
-caustics.layer.visible = !frozenSurface;
-swells.layer.visible = !frozenSurface;
+caustics.layer.visible = !calmWater;
+swells.layer.visible = !calmWater;
 waterFx.mask = waterMask;
 // 萤火虫光点（夜间）
 const fireflies = new Fireflies();
 // 季节降雪（冬季氛围场）
 const snowfall = new Snowfall();
-snowfall.frozen = frozenSurface; // 冰面上不化成一圈圈波纹，只留一个小融点
+snowfall.calm = calmWater; // 静水上不化成一圈圈波纹，只留一个小融点
 // 季节降雨（春季氛围场）
 const rainfall = new Rainfall();
 app.stage.addChild(
@@ -183,7 +178,6 @@ app.stage.addChild(
   foodLayer.container,
   ...(frog ? [frog.sp] : []),
   veil,
-  ...(ice ? [ice] : []),
   dayTint.sp,
   ...fogs,
   critters.air,
@@ -202,8 +196,8 @@ document.addEventListener('mouseleave', () => (cursor = null));
 // 涟漪回调：wake 收【归一化屏幕坐标】(0..1)，与 Water.drop 一致（r/s 为可选强度：
 // 鱼尾波小圈，蛙落/蛙鸣/蜻蜓点水大圈）。历史上这里多做了一次 /W、/H，导致鱼吃食、
 // 青蛙落地、蜻蜓点水的涟漪全被画到左上角去了。
-// 结冰时所有落水扰动都静音：鱼尾波、投喂、蜻蜓点水都不再起波纹
-const wake = frozenSurface ? () => {} : (nx: number, ny: number, r = 1.1, s = 0.12) => water.drop(nx, ny, r, s);
+// 静水时所有落水扰动都静音：鱼尾波、投喂、蜻蜓点水都不再起波纹
+const wake = calmWater ? () => {} : (nx: number, ny: number, r = 1.1, s = 0.12) => water.drop(nx, ny, r, s);
 
 // —— 投喂：只有点击才撒食（2026-10-02 拍板，悬停自动撒食已撤）——
 function feedAt(x: number, y: number) {
@@ -335,7 +329,7 @@ app.ticker.add((tk) => {
   // 悬停撒食已撤（2026-10-02）：只有点击才有食物
 
   water.step(dt);
-  if (!frozenSurface) stepGlints(dt, W, H); // 冰面没有随机微波
+  if (!calmWater) stepGlints(dt, W, H); // 静水没有随机微波
   // 蜻蜓：只在夏季（6–8 月）白天 7:00–18:30 活动；?dfly=1 强制预览
   const nfHour = cfg.hour ?? nowHour();
   const month = new Date().getMonth() + 1;
@@ -343,7 +337,7 @@ app.ticker.add((tk) => {
   // 焦散推进：正午最亮、夜里只剩月光级光网（fish-d dayPhase causticMul 1.0↔0.22）
   const wxHour = cfg.hour ?? nowHour();
   const dayness = Math.max(0, Math.min(1, 1 - Math.abs(wxHour - 12) / 9));
-  if (!frozenSurface) {
+  if (!calmWater) {
     caustics.update(T, 0.22 + 0.78 * dayness);
     swells.update(T, 1);
   }
@@ -385,7 +379,7 @@ app.ticker.add((tk) => {
       // 并让其中一部分落点变成真实的涟漪）
       snowfall.update(dt, T, env, (nx, ny) => {
         const wet = pond.probe(nx * W, ny * H).d > 12;
-        if (wet && !frozenSurface && Math.random() < 0.3) water.drop(nx, ny, 1 + Math.random(), 0.08);
+        if (wet && !calmWater && Math.random() < 0.3) water.drop(nx, ny, 1 + Math.random(), 0.08);
         return wet;
       });
     }
