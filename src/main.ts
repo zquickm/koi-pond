@@ -133,8 +133,9 @@ if (calmWater) {
   dispBottom.scale.set(0);
   dispSchool.scale.set(0);
 }
-// 青蛙：只有夏季（6–8 月）才有青蛙的活动，与蜻蜓同一套月份开关；?frog=1 强制预览。
-// 整套实现与落脚点标定都留在 lily.ts / pondzone.PERCHES 里，按季显隐不重启。
+// 青蛙：默认荷塘底图就是夏天的场景，四季里的夏图（?season=summer）也算——
+// 只有这些夏景底图上有青蛙活动，春/秋/冬图没有；?frog=1 可在其他底图上强制预览。
+// 整套实现与落脚点标定都留在 lily.ts / pondzone.PERCHES 里，按底图显隐不重启。
 const frog = new Frog(frogTex);
 const critters = new Critters(tadArts, dflyTex);
 const foodLayer = new FoodLayer();
@@ -328,12 +329,13 @@ app.ticker.add((tk) => {
   water.step(dt);
   if (!calmWater) stepGlints(dt, W, H); // 静水没有随机微波
   // 蜻蜓：只在夏季（6–8 月）白天 7:00–18:30 活动；?dfly=1 强制预览
-  // 青蛙：只在夏季（6–8 月）活动，白天黑夜都出来（夜里鼓腮正是蛙鸣）；?frog=1 强制预览
+  // 青蛙：跟夏景底图走（默认荷塘=夏天，?season=summer 同理），昼夜都出来（夜里鼓腮正是蛙鸣）；?frog=1 强制预览
   const nfHour = cfg.hour ?? nowHour();
   const month = new Date().getMonth() + 1;
   const summer = month >= 6 && month <= 8;
   const dflyOn = seasonQuery.has('dfly') || (summer && nfHour >= 7 && nfHour <= 18.5);
-  const frogOn = seasonQuery.has('frog') || summer;
+  const summerScene = cfg.season === 'v7' || cfg.season === 'summer';
+  const frogOn = seasonQuery.has('frog') || summerScene;
   // 焦散推进：正午最亮、夜里只剩月光级光网（fish-d dayPhase causticMul 1.0↔0.22）
   const wxHour = cfg.hour ?? nowHour();
   const dayness = Math.max(0, Math.min(1, 1 - Math.abs(wxHour - 12) / 9));

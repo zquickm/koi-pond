@@ -30,7 +30,7 @@ export class Frog {
   private maxHop = 460;
   private hops = 0;
   private lastHopDist = 0;
-  private seasonalOn = false; // 夏季才出场（main.ts 按月份传入，同蜻蜓）
+  private seasonalOn = false; // 夏景底图才出场（main.ts 按当前底图传入）
 
   constructor(frogTex: Texture) {
     this.tex = frogTex;
