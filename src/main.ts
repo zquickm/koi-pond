@@ -430,7 +430,7 @@ window.addEventListener('pointerdown', (e) => {
 let seasonCur: string = cfg.season;
 let seasonNext = '';
 let fadeLeft = 0;
-const SEASON_FADE = 5;
+const SEASON_FADE = 2;
 function setSeason(id: string) {
   if (id === seasonCur || !bgTexs[id]) return;
   seasonNext = id;
