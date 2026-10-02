@@ -242,9 +242,10 @@ function bakeWinterArt(): { base: Texture; ice: Texture } {
   return { base: Texture.from(c), ice: Texture.from(iceC) };
 }
 const winterBaked = bakeWinterArt();
-/** 春图校色（2026-10-03 三轮反馈收敛到这）：通道混合调色——
- *  绿色彩度收 22%，卸下来的绿转移给蓝（池塘偏蓝）；红蓝彩度放大（粉荷水色丰富）；
- *  低饱和暗部整体压 10%（石头/墨色更沉）。色相构图不动。 */
+/** 春图校色（2026-10-03 四轮定稿，按修图界标准配方：Hue/Sat 定向 + 色偏品红 + S 曲线）：
+ *  ①绿区色相(55°-175°)整体 +30° 转向青蓝——黄绿的池塘/荷叶直接变蓝绿，不是减淡绿；
+ *  ②全局绿通道轻收(品红向色偏补偿)——治近中性水面的绿灰底；
+ *  ③亮度过 smoothstep 的 S 曲线(混 40%)——对比拉开，石头墨色沉下去。 */
 function softenGreen(im: HTMLImageElement): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = im.width;
@@ -255,18 +256,44 @@ function softenGreen(im: HTMLImageElement): HTMLCanvasElement {
   const p = d.data;
   const cl = (v: number) => Math.max(0, Math.min(255, v));
   for (let i = 0; i < p.length; i += 4) {
-    const l = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
-    const gd = p[i + 1] - l;
-    p[i] = cl(l + (p[i] - l) * 1.16);
-    p[i + 1] = cl(l + gd * 0.78);
-    p[i + 2] = cl(l + (p[i + 2] - l) * 1.26 + gd * 0.22); // 绿的减量喂给蓝：池塘转蓝
-    // 石头：低彩且偏暗的像素压黑一成
-    const sat = Math.abs(p[i] - l) + Math.abs(p[i + 1] - l) + Math.abs(p[i + 2] - l);
-    if (sat < 26 && l < 150) {
-      p[i] *= 0.9;
-      p[i + 1] *= 0.9;
-      p[i + 2] *= 0.9;
+    let r = p[i] / 255;
+    let gch = (p[i + 1] / 255) * 0.965; // 品红向：先收一点全局绿
+    let b = p[i + 2] / 255;
+    const max = Math.max(r, gch, b);
+    const min = Math.min(r, gch, b);
+    const d0 = max - min;
+    const l = (max + min) / 2;
+    let s = d0 === 0 ? 0 : d0 / (1 - Math.abs(2 * l - 1));
+    let h = 0;
+    if (d0 > 0) {
+      if (max === r) h = 60 * (((gch - b) / d0) % 6);
+      else if (max === gch) h = 60 * ((b - r) / d0 + 2);
+      else h = 60 * ((r - gch) / d0 + 4);
+      if (h < 0) h += 360;
+      if (h >= 55 && h <= 175) {
+        h += 30; // 绿区转向青蓝
+        s *= 0.9;
+      }
     }
+    // S 曲线加对比
+    const L = l + (l * l * (3 - 2 * l) - l) * 0.4;
+    const C = (1 - Math.abs(2 * L - 1)) * s;
+    const X = C * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = L - C / 2;
+    let rr: number;
+    let gg: number;
+    let bb: number;
+    if (h < 60) { rr = C; gg = X; bb = 0; }
+    else if (h < 120) { rr = X; gg = C; bb = 0; }
+    else if (h < 180) { rr = 0; gg = C; bb = X; }
+    else if (h < 240) { rr = 0; gg = X; bb = C; }
+    else if (h < 300) { rr = X; gg = 0; bb = C; }
+    else { rr = C; gg = 0; bb = X; }
+    // 低彩暗部再压一成（石头/墨色）
+    const dark = s < 0.1 && L < 0.6 ? 0.92 : 1;
+    p[i] = cl((rr + m) * 255 * dark);
+    p[i + 1] = cl((gg + m) * 255 * dark);
+    p[i + 2] = cl((bb + m) * 255 * dark);
   }
   g.putImageData(d, 0, 0);
   return c;
