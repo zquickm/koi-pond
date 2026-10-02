@@ -425,8 +425,8 @@ window.addEventListener('pointerdown', (e) => {
   feedAt(e.clientX, e.clientY);
 });
 
-// —— 换季：交叉溶解 10s；数字键 1-5 现场切（壳面板日后接同一入口 setSeason）——
-// 1/3 都是夏（v7=默认荷塘=夏景）、2 春、4 秋、5 冬
+// —— 换季：交叉溶解；数字键 1-4=春/夏/秋/冬 现场切（壳面板日后接同一入口 setSeason）——
+// 夏=2 是默认荷塘（v7）
 let seasonCur: string = cfg.season;
 let seasonNext = '';
 let fadeLeft = 0;
@@ -441,7 +441,7 @@ function setSeason(id: string) {
   pond.setZone(ZONES[id] ?? ZONES.v7, PERCHES[id] ?? []);
   placeBottom(app.screen.width, app.screen.height);
 }
-const KEY_SEASON: Record<string, string> = { '1': 'v7', '2': 'spring', '3': 'v7', '4': 'autumn', '5': 'winter' };
+const KEY_SEASON: Record<string, string> = { '1': 'spring', '2': 'v7', '3': 'autumn', '4': 'winter' };
 window.addEventListener('keydown', (e) => {
   const id = KEY_SEASON[e.key];
   if (id) setSeason(id);
@@ -659,7 +659,9 @@ app.ticker.add((tk) => {
     // 预览参数优先于季节：?snow 在春天也下雪，?rain 在冬天也下雨
     const rainOn = forceRain || (!forceSnow && (seasonCur === 'spring' || seasonCur === 'v7'));
     if (rainOn) {
-      // 可见雨丝 + 落点水花；部分落点转化成真实涟漪（雨强峰值只作用于雨）
+      // 可见雨丝 + 落点水花；部分落点转化成真实涟漪（雨强峰值只作用于雨）。
+      // 雪层也要收一帧 k=0——否则刚从冬切过来时，半空的雪会冻在屏上不消失
+      snowfall.update(dt, T, 0);
       rainfall.update(dt, ramp * rainPeak, (nx, ny) => {
         if (pond.probe(nx * W, ny * H).d > 10 && Math.random() < 0.4) {
           water.drop(nx, ny, 0.8 + Math.random() * 0.8, 0.08 + Math.random() * 0.08);
@@ -683,7 +685,8 @@ app.ticker.add((tk) => {
         return wet;
       });
     }
-  } else if (seasonCur === 'winter' || forceSnow) {
+  } else {
+    // 没有正下的天气：雪层收 k=0 把自己藏起来（也让融痕淡完）——不管什么季节都跑
     snowfall.update(dt, T, 0);
   }
   // 雪压在 dayTint 之上，不受夜景调色，所以要按"此刻夜色有多深"单独压淡：
