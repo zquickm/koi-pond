@@ -398,6 +398,6 @@ app.ticker.add((tk) => {
   });
 });
 
-// 时钟/农历小组件（DOM 水印式，右上角）
+// 时钟/农历小组件（DOM 水印式，右上角）：冬季额外给这块加一层"雪"
 const widget = new ClockWidget();
-widget.start(cfg.hour);
+widget.start(cfg.hour, cfg.season === 'winter' || forceSnow);
