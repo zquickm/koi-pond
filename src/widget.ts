@@ -22,7 +22,9 @@ export class ClockWidget {
   private cx: CanvasRenderingContext2D | null = null;
   private textCv: HTMLCanvasElement | null = null; // 离屏：只有字形（用来取积雪的顶边）
   private topY = new Int32Array(0); // 每一列笔画顶边（-1 = 这列没字）
-  private capDepth = new Float32Array(0); // 每一列积雪厚度
+  private pile = new Float32Array(0); // 每一列积了多厚的雪（从 0 开始长）
+  private holdMax = new Float32Array(0); // 每一列最多挂得住多厚（小字挂得少，不然字被埋掉）
+  private slumps: { x: number; y: number; r: number; vy: number; vx: number; a: number }[] = [];
   private snowy = false;
   private lastText = '';
   private flakes: Flake[] = [];
@@ -177,6 +179,7 @@ export class ClockWidget {
       [this.date, 0.92],
       [this.lunar, 0.8],
     ];
+    const bands: [number, number, number][] = []; // [上, 下, 最多挂多厚]
     for (const [el] of lines) {
       const t = el.textContent ?? '';
       if (!t) continue;
@@ -191,7 +194,9 @@ export class ClockWidget {
       const asc = m.fontBoundingBoxAscent || fs * 0.8;
       const desc = m.fontBoundingBoxDescent || fs * 0.2;
       const r = el.getBoundingClientRect();
-      const baseY = r.top - box.top + this.pad + (r.height - (asc + desc)) / 2 + asc;
+      const top = r.top - box.top + this.pad;
+      bands.push([top, top + r.height, Math.max(2.2, Math.min(7.5, fs * 0.11))]);
+      const baseY = top + (r.height - (asc + desc)) / 2 + asc;
       // 只画剪影：这一层永远不显示，只用来量笔画顶边
       tx.fillStyle = '#000';
       tx.fillText(t, right, baseY);
@@ -201,7 +206,6 @@ export class ClockWidget {
     const pw = this.textCv!.width;
     const ph = this.textCv!.height;
     this.topY = new Int32Array(W).fill(-1);
-    this.capDepth = new Float32Array(W);
     for (let x = 0; x < W; x++) {
       const px = Math.min(pw - 1, Math.round(x * dpr));
       for (let y = 0; y < ph; y++) {
@@ -211,11 +215,18 @@ export class ClockWidget {
         }
       }
     }
-    // 厚度用两段正弦叠出来（比随机数顺，也不会随时间抖）
+    // 每列"挂得住多厚"：看这列的笔画顶边落在哪一行（大字挂得多，小字挂得少）
+    this.holdMax = new Float32Array(W);
     for (let x = 0; x < W; x++) {
-      const w1 = Math.sin(x * 0.045) * 0.5 + Math.sin(x * 0.13 + 1.7) * 0.5;
-      this.capDepth[x] = 2.2 + w1 * 1.1 + 1.4;
+      const t = this.topY[x];
+      if (t < 0) continue;
+      let hold = 6.5;
+      for (const [b0, b1, h] of bands) if (t >= b0 - 1 && t <= b1) hold = h;
+      this.holdMax[x] = hold;
     }
+    // 换字（每分钟）＝ 重新开始积：从 0 长起
+    this.pile = new Float32Array(W);
+    this.slumps = [];
   }
 
   private drawSnow(dt: number) {
@@ -225,39 +236,47 @@ export class ClockWidget {
     const w = this.cw;
     const h = this.ch;
     cx.clearRect(0, 0, w, h);
-    if (this.snowy && this.lastText === '') this.fitSnow();
-    // 字顶积雪：盖在笔画顶上（DOM 文字本身照旧由 CSS 渲染，这里只叠雪）
-    if (this.topY.length === w) {
-      const cap = new Path2D();
-      for (let x = 0; x < w; x++) {
-        const t = this.topY[x];
-        if (t < 0) continue;
-        cap.rect(x, t - 0.6, 1.2, this.capDepth[x]);
-      }
-      cx.save();
-      // 雪自己的冷影：淡底上纯白会糊掉，垫一层才有厚度
-      cx.translate(0, 1.4);
-      cx.fillStyle = 'rgba(104,136,172,.42)';
-      cx.fill(cap);
-      cx.restore();
-      cx.save();
-      cx.filter = 'blur(0.7px)';
-      cx.fillStyle = 'rgba(255,255,255,.97)';
-      cx.fill(cap);
-      cx.restore();
+    if (this.topY.length !== w) return; // 还没量好字形
+
+    this.growPile(dt);
+    this.updateFlakes(dt);
+    this.updateSlumps(dt);
+
+    // 1) 积雪：从笔画顶边往下盖 pile[x] 这么厚
+    cx.save();
+    const cap = new Path2D();
+    for (let x = 0; x < w; x++) {
+      if (this.topY[x] < 0 || this.pile[x] <= 0.05) continue;
+      cap.rect(x, this.topY[x] - 0.6, 1.15, this.pile[x]);
     }
-    // 飘雪：只在这一小块里，边上淡出
+    cx.save();
+    cx.translate(0, 1.6);
+    cx.fillStyle = 'rgba(104,136,172,.4)'; // 雪自己的冷影：淡底上纯白会糊
+    cx.fill(cap);
+    cx.restore();
+    cx.fillStyle = 'rgba(255,255,255,.97)';
+    cx.fill(cap);
+    cx.restore();
+
+    // 2) 滑落下来的雪块
+    cx.save();
+    cx.shadowColor = 'rgba(104,136,172,.5)';
+    cx.shadowBlur = 3;
+    cx.shadowOffsetY = 1;
+    for (const d of this.slumps) {
+      cx.beginPath();
+      cx.ellipse(d.x, d.y, d.r * 0.8, d.r * 1.25, 0, 0, Math.PI * 2);
+      cx.fillStyle = `rgba(255,255,255,${Math.max(0, Math.min(1, d.a)).toFixed(3)})`;
+      cx.fill();
+    }
+    cx.restore();
+
+    // 3) 飘雪（在最前）
     cx.save();
     cx.shadowColor = 'rgba(104,136,172,.55)';
     cx.shadowBlur = 3;
     cx.shadowOffsetY = 1;
     for (const f of this.flakes) {
-      f.y += f.vy * dt;
-      f.x += Math.sin(this.t * 0.7 + f.ph) * f.sw * dt;
-      if (f.y > h + 4) {
-        f.y = -4;
-        f.x = Math.random() * w;
-      }
       const edge = Math.min(f.x, w - f.x, f.y, h - f.y);
       const k = Math.max(0, Math.min(1, edge / (this.pad * 0.75)));
       cx.beginPath();
@@ -266,5 +285,86 @@ export class ClockWidget {
       cx.fill();
     }
     cx.restore();
+  }
+
+  /** 越积越厚：每列慢慢长雪 → 相互塌陷变圆 → 超过能挂住的厚度就滑落 */
+  private growPile(dt: number) {
+    const w = this.cw;
+    const n = this.pile.length;
+    if (n !== w) return;
+    // 1) 长雪：速率跟着"挂得住多厚"走，大小两行差不多同时积满
+    for (let x = 0; x < w; x++) {
+      if (this.topY[x] < 0) {
+        this.pile[x] = 0;
+        continue;
+      }
+      const nz = 0.4 + 1.3 * (Math.sin(x * 0.055) * 0.5 + Math.sin(x * 0.23 + 2.1) * 0.35 + Math.sin(x * 0.71) * 0.15 + 1) * 0.5;
+      this.pile[x] = Math.min(this.pile[x] + this.holdMax[x] * 0.05 * nz * dt, this.holdMax[x] * 1.6);
+    }
+    // 2) 塌陷：厚的地方往旁边淌一点，堆成圆丘而不是一排尖
+    const k = Math.min(1, dt * 1.6);
+    const src = this.pile.slice();
+    for (let x = 1; x < w - 1; x++) {
+      if (this.topY[x] < 0) continue;
+      const nb = [src[x - 1], src[x + 1]].filter((_, i) => this.topY[x - 1 + i * 2] >= 0);
+      if (!nb.length) continue;
+      const avg = nb.reduce((a, b) => a + b, 0) / nb.length;
+      this.pile[x] += (avg - src[x]) * 0.32 * k;
+    }
+    // 3) 挂不住了：滑落一块（每帧最多几处，免得整排一起掉）
+    let shed = 0;
+    for (let x = 0; x < w && shed < 3; x++) {
+      if (this.topY[x] < 0) continue;
+      const hold = this.holdMax[x] * (0.86 + 0.28 * ((Math.sin(x * 0.07 + 0.8) + 1) * 0.5));
+      if (this.pile[x] <= hold) continue;
+      shed++;
+      const thick = this.pile[x];
+      this.slumps.push({
+        x: x + 0.5,
+        y: this.topY[x] + thick,
+        r: 1.8 + thick * 0.42,
+        vy: 4 + thick * 1.2,
+        vx: (Math.random() - 0.5) * 8,
+        a: 0.95,
+      });
+      // 带走自己大半，顺手把两边也拽薄一点（像真的滑塌）
+      this.pile[x] *= 0.16;
+      for (const i of [-2, -1, 1, 2]) {
+        const j = x + i;
+        if (j > 0 && j < w && this.topY[j] >= 0) this.pile[j] *= 0.78;
+      }
+    }
+  }
+
+  private updateFlakes(dt: number) {
+    const w = this.cw;
+    const h = this.ch;
+    for (const f of this.flakes) {
+      f.y += f.vy * dt;
+      f.x += Math.sin(this.t * 0.7 + f.ph) * f.sw * dt;
+      const col = Math.round(f.x);
+      const top = col >= 0 && col < this.topY.length ? this.topY[col] : -1;
+      // 落在笔画上：粘住（给那一列加厚）后重新从顶上飘下来
+      if (top >= 0 && f.y >= top - f.r && this.pile[col] < this.holdMax[col] * 1.5) {
+        this.pile[col] = Math.min(this.pile[col] + this.holdMax[col] * 0.07, this.holdMax[col] * 1.6);
+        f.y = -4;
+        f.x = Math.random() * w;
+        continue;
+      }
+      if (f.y > h + 4) {
+        f.y = -4;
+        f.x = Math.random() * w;
+      }
+    }
+  }
+
+  private updateSlumps(dt: number) {
+    for (const d of this.slumps) {
+      d.vy += 130 * dt;
+      d.y += d.vy * dt;
+      d.x += d.vx * dt;
+      d.a -= 0.45 * dt;
+    }
+    this.slumps = this.slumps.filter((d) => d.a > 0 && d.y < this.ch + 20);
   }
 }
