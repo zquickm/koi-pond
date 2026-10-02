@@ -1,6 +1,6 @@
 // 水墨小生灵（素材版）：蝌蚪连通域拆分各自变速窜游；
 // 蜻蜓双曝残影振翅，造访式出场——从屏幕外飞入，点水几次后飞走，过一会儿再来。
-import { Container, Sprite, Texture } from 'pixi.js';
+import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 
 interface TadArt {
   tex: Texture;
@@ -275,6 +275,194 @@ export class Fireflies {
       const s = (f.big ? 1.15 : 0.8) * (0.75 + 0.4 * glow);
       f.sp.scale.set(s);
     }
+  }
+}
+
+/** 季节降雪（冬季）：白圆点，三层景深（远景小 / 中景 / 近景大而虚），缓飘+融痕；k 控制强弱。
+ *
+ *  刻意画得简单——就是白圆点，不做花样：远景小而实、中景中等、近景大而虚（alpha 低、边更软），
+ *  90 颗里三层按 50/34/16 分。唯一的小处理是色：冬季底图是一张很淡的暖白纸（正午实测 L≈220），
+ *  所以圆的芯留纯白（亮过底子才看得见），只有软边收一档冷蓝（雪在阴影里本来就偏蓝），
+ *  tint 再极轻地往冷里带一点，白点边缘就有了微差。 */
+type Tier = 0 | 1 | 2;
+type Flake = { sp: Sprite; x: number; y: number; vx: number; vy: number; ph: number; sw: number; s: number; a: number; tint: number; tier: Tier; life: number; ttl: number };
+
+/** 两个色之间的插值（tint 只做乘法，冷蓝的深浅靠这里定） */
+function mixHex(a: number, b: number, t: number) {
+  const ch = (v: number, sh: number) => (v >> sh) & 255;
+  const m = (sh: number) => Math.round(ch(a, sh) + (ch(b, sh) - ch(a, sh)) * t);
+  return (m(16) << 16) | (m(8) << 8) | m(0);
+}
+
+/** 圆点贴图：soft=false 边略实（远/中景），soft=true 更软更散（近景虚焦） */
+function snowDot(soft: boolean, S = 64) {
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d')!;
+  const h = S / 2;
+  const grd = g.createRadialGradient(h, h, 0, h, h, h);
+  if (!soft) {
+    grd.addColorStop(0, 'rgba(255,255,255,1)');
+    grd.addColorStop(0.62, 'rgba(253,254,255,0.97)');
+    grd.addColorStop(0.86, 'rgba(232,242,254,0.45)'); // 冷蓝软边
+    grd.addColorStop(1, 'rgba(214,230,248,0)');
+  } else {
+    grd.addColorStop(0, 'rgba(255,255,255,0.98)');
+    grd.addColorStop(0.3, 'rgba(250,253,255,0.8)');
+    grd.addColorStop(0.68, 'rgba(230,241,254,0.36)');
+    grd.addColorStop(1, 'rgba(210,228,248,0)');
+  }
+  g.fillStyle = grd;
+  g.fillRect(0, 0, S, S);
+  return c;
+}
+
+export class Snowfall {
+  readonly container = new Container();
+  private flakes: Flake[] = [];
+  private W = 800;
+  private H = 600;
+  private texs: Texture[];
+
+  constructor(private count = 90) {
+    this.texs = [Texture.from(snowDot(false)), Texture.from(snowDot(true))];
+  }
+
+  layout(W: number, H: number) {
+    this.W = W;
+    this.H = H;
+  }
+
+  update(dt: number, t: number, k: number, onMelt?: (nx: number, ny: number) => void) {
+    this.container.visible = k > 0.02;
+    if (k <= 0.02) return;
+    while (this.flakes.length < this.count) {
+      const f: Flake = { sp: new Sprite(this.texs[0]), ...this.spawn() };
+      f.sp.anchor.set(0.5);
+      f.sp.texture = this.texs[f.tier === 2 ? 1 : 0];
+      this.container.addChild(f.sp);
+      this.flakes.push(f);
+    }
+    for (const f of this.flakes) {
+      f.life += dt;
+      f.x += (f.vx + Math.sin(t * (f.tier === 2 ? 0.34 : 0.62) + f.ph) * f.sw) * dt;
+      f.y += f.vy * dt;
+      if (f.life > f.ttl || f.y > this.H + 40 || f.x < -60 || f.x > this.W + 60) {
+        if (onMelt && f.tier > 0 && f.y < this.H + 10 && Math.random() < 0.15) onMelt(f.x / this.W, f.y / this.H);
+        Object.assign(f, this.spawn());
+        f.sp.texture = this.texs[f.tier === 2 ? 1 : 0];
+      }
+      f.sp.position.set(f.x, f.y);
+      f.sp.alpha = k * f.a * Math.min(1, f.life * 1.6);
+      f.sp.scale.set(f.s);
+      f.sp.tint = f.tint;
+    }
+  }
+
+  /** 三层景深：尺寸/落速/摆动随层变（近景大、慢、淡）；冷蓝 tint 只是浅浅一层 */
+  private spawn(): Omit<Flake, 'sp'> {
+    const r = Math.random();
+    const j = Math.random();
+    let tier: Tier;
+    let s: number;
+    let a: number;
+    let vy: number;
+    let tint: number;
+    if (r < 0.5) {
+      // 远景小雪：密、小、实，负责"这是在下雪"的整体质感
+      tier = 0;
+      s = 0.085 + Math.random() * 0.05;
+      a = 1;
+      vy = 9 + Math.random() * 12;
+      tint = mixHex(0xfdfeff, 0xf2f8ff, j);
+    } else if (r < 0.84) {
+      tier = 1;
+      s = 0.17 + Math.random() * 0.1;
+      a = 0.85;
+      vy = 12 + Math.random() * 13;
+      tint = mixHex(0xfbfeff, 0xedf5ff, j);
+    } else {
+      // 近景虚焦：大、淡，越大越淡
+      tier = 2;
+      s = 0.5 + Math.random() * 0.55;
+      a = 0.34 - (s - 0.5) * 0.14;
+      vy = 16 + Math.random() * 18;
+      tint = mixHex(0xf6fbff, 0xe6f0fd, j);
+    }
+    return {
+      x: Math.random() * (this.W + 60) - 30,
+      y: Math.random() * this.H,
+      vx: (Math.random() - 0.5) * 10,
+      vy,
+      ph: Math.random() * Math.PI * 2,
+      sw: 4 + s * 9, // 摆动幅度随颗粒大小（近景飘得更慢更沉）
+      s,
+      a,
+      tint,
+      tier,
+      life: 0,
+      ttl: 12 + Math.random() * 14,
+    };
+  }
+}
+
+/** 季节降雨（春季）：斜落的雨丝 + 落点水花圈；强度 k 由季节氛围场控制（渐入渐出） */
+export class Rainfall {
+  readonly container = new Container();
+  private g = new Graphics();
+  private drops: { x: number; y: number; vy: number; len: number; ty: number }[] = [];
+  private splashes: { x: number; y: number; r: number; a: number }[] = [];
+  private W = 800;
+  private H = 600;
+
+  constructor(private count = 70) {
+    this.container.addChild(this.g);
+  }
+
+  layout(W: number, H: number) {
+    this.W = W;
+    this.H = H;
+  }
+
+  update(dt: number, k: number, onSplash?: (nx: number, ny: number) => void) {
+    this.g.clear();
+    this.container.visible = k > 0.02 || this.splashes.length > 0;
+    if (this.container.visible === false) return;
+    const slope = 0.16;
+    const target = Math.round(this.count * k);
+    while (this.drops.length < target) this.drops.push(this.spawn());
+    if (this.drops.length > target) this.drops.length = target;
+    for (const d of this.drops) {
+      d.y += d.vy * dt;
+      d.x += d.vy * slope * dt;
+      if (d.y >= d.ty) {
+        this.splashes.push({ x: d.x, y: d.ty, r: 1, a: 0.55 * k });
+        if (onSplash && Math.random() < 0.2) onSplash(d.x / this.W, d.ty / this.H);
+        Object.assign(d, this.spawn());
+      }
+    }
+    for (const s of this.splashes) {
+      s.r += 26 * dt;
+      s.a -= 2.2 * dt;
+    }
+    this.splashes = this.splashes.filter((s) => s.a > 0);
+    for (const d of this.drops) {
+      this.g.moveTo(d.x, d.y).lineTo(d.x - slope * d.len, d.y - d.len);
+    }
+    // 深灰青雨丝：浅色画面上才可见（白雨丝会没进底色里）
+    this.g.stroke({ color: 0x5f7580, alpha: Math.min(1, 0.2 * k + 0.03), width: 1 });
+    for (const s of this.splashes) this.g.circle(s.x, s.y, s.r);
+    this.g.stroke({ color: 0x5f7580, alpha: Math.min(1, 0.25 * k + 0.03), width: 1 });
+  }
+
+  private spawn() {
+    return {
+      x: Math.random() * (this.W + 140) - 70,
+      y: -20 - Math.random() * this.H,
+      vy: 380 + Math.random() * 160,
+      len: 12 + Math.random() * 16,
+      ty: Math.random() * this.H,
+    };
   }
 }
 

@@ -4,7 +4,7 @@ import { makeFogTexture, WATER_TINT } from './bottom';
 import { Water } from './water';
 import { School } from './fish';
 import { Frog } from './lily';
-import { Critters, Fireflies } from './critters';
+import { Critters, Fireflies, Rainfall, Snowfall } from './critters';
 import { FoodLayer } from './food';
 import { DayTint } from './daycycle';
 import { ClockWidget } from './widget';
@@ -148,6 +148,10 @@ waterFx.addChild(caustics.layer, swells.layer);
 waterFx.mask = waterMask;
 // 萤火虫光点（夜间）
 const fireflies = new Fireflies();
+// 季节降雪（冬季氛围场）
+const snowfall = new Snowfall();
+// 季节降雨（春季氛围场）
+const rainfall = new Rainfall();
 app.stage.addChild(
   bottom,
   water.waveMap,
@@ -161,6 +165,8 @@ app.stage.addChild(
   dayTint.sp,
   ...fogs,
   critters.air,
+  snowfall.container,
+  rainfall.container,
   fireflies.container,
 );
 
@@ -198,6 +204,8 @@ function layout(W: number, H: number) {
   water.layout(W, H, pond);
   caustics.layout(W, H);
   swells.layout(W, H);
+  snowfall.layout(W, H);
+  rainfall.layout(W, H);
   fireflies.layout(W, H);
   frog?.layout(W, H, pond);
   veil.width = W;
@@ -216,6 +224,13 @@ let lastH = 0;
 // 水波反光：随机微波荡开一圈圈渐弱的高光（与点击涟漪同一套波动方程，只是轻得多）。
 // 落点采样限定在水内，不在岸上；偶尔来一圈稍大的（像风掠过/鱼摆尾）。
 let glintT = 0.8;
+// 季节氛围场：春季小雨 / 冬季降雪（?rain=1 / ?snow=1 常开预览）
+let seasonT = 8 + Math.random() * 12;
+let seasonLeft = 0;
+let seasonElapsed = 0;
+const seasonQuery = new URLSearchParams(location.search);
+const forceRain = seasonQuery.has('rain');
+const forceSnow = seasonQuery.has('snow');
 function stepGlints(dt: number, W: number, H: number) {
   glintT -= dt;
   if (glintT > 0) return;
@@ -320,6 +335,38 @@ app.ticker.add((tk) => {
   // 萤火虫：黄昏 18h 起随暮色渐显（初萤），凌晨 5.5h 前渐隐
   const nightK = Math.max(0, Math.min(1, nfHour >= 12 ? (nfHour - 18) / 1.2 : (5.5 - nfHour) / 1.2));
   fireflies.update(T, nightK);
+  // 季节氛围：春季随机小雨 / 冬季随机降雪，每场约 1 分钟、间隔随机（?rain=1 / ?snow=1 常开预览）
+  if (cfg.season === 'spring' || cfg.season === 'winter') {
+    seasonT -= dt;
+    if (seasonT <= 0 && seasonLeft <= 0) {
+      seasonLeft = 55 + Math.random() * 15;
+      seasonElapsed = 0;
+      seasonT = 50 + Math.random() * 130;
+    }
+  }
+  if (forceRain || forceSnow) seasonLeft = Math.max(seasonLeft, 60);
+  if (seasonLeft > 0) {
+    seasonLeft -= dt;
+    seasonElapsed += dt;
+    const env = Math.max(0, Math.min(1, seasonElapsed / 6, seasonLeft / 6));
+    // 预览参数优先于季节：?snow=1 在春天也下雪，?rain=1 在冬天也下雨
+    const rainOn = forceRain || (!forceSnow && cfg.season === 'spring');
+    if (rainOn) {
+      // 可见雨丝 + 落点水花；部分落点转化成真实涟漪
+      rainfall.update(dt, env, (nx, ny) => {
+        if (pond.probe(nx * W, ny * H).d > 10 && Math.random() < 0.4) {
+          water.drop(nx, ny, 0.8 + Math.random() * 0.8, 0.08 + Math.random() * 0.08);
+        }
+      });
+    } else {
+      // 降雪：雪粒缓飘，落水偶有融痕
+      snowfall.update(dt, T, env, (nx, ny) => {
+        if (pond.probe(nx * W, ny * H).d > 12) water.drop(nx, ny, 1 + Math.random(), 0.08);
+      });
+    }
+  } else if (cfg.season === 'winter' || forceSnow) {
+    snowfall.update(dt, T, 0);
+  }
   // 昼夜：?hour=22 可强制预览
   dayTint.update(cfg.hour ?? nowHour());
   fogs.forEach((f, i) => {
