@@ -59,15 +59,149 @@ const [bgDefaultI, bgSpringI, bgAutumnI, bgWinterI] = await Promise.all(
   [bgDefaultUrl, bgSpringUrl, bgAutumnUrl, bgWinterUrl].map(loadImg),
 );
 
-/** 冬季底图一次性烘焙：冬画（本身已画好冰湖雪景）+ 荷叶/石头/草丛上缘的积雪盖。
- *  旧版那张预烘焙冰板（bg-winter-ice）是给深色水面的旧冬画用的，满屏白板会盖掉
- *  新冬画的冰湖水色（2026-10-03"偏黄/跟原图不一样"的元凶），不再使用。 */
+/** 冬季底图一次性烘焙：冬画（本身已画好冰湖雪景）+ 冰裂纹 + 荷叶/石头/草丛上缘的积雪盖。
+ *  冰裂 = Voronoi 拼块分界线（真实湖冰的裂纹形态，2026-10-03 调研 Blender Artists/80.lv）：
+ *  散点 → 相邻种子的中垂线段 → 抖动成微弯折线，"宽软反光底 + 主裂暗线 + 偏移高光棱"
+ *  三层描边假深度，随机长次级枝裂；全部裁在标定水岸内、低透明度，不盖画的冰湖水色。
+ *  旧预烘焙冰板（近不透明白板）已弃用——会盖掉新冬画的水色，见 9504ccd。 */
 function makeWinterTex(): Texture {
   const c = document.createElement('canvas');
   c.width = bgWinterI.width;
   c.height = bgWinterI.height;
   const g = c.getContext('2d')!;
   g.drawImage(bgWinterI, 0, 0);
+  // 固定种子的伪随机：烘焙结果稳定，刷新不换裂纹
+  let seed = 20261003;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  // 水域：四季图与 v8 同构图，直接用标定过的水岸（比例坐标 → 画布像素）
+  const poly = (ZONES.v7 as readonly (readonly [number, number])[]).map(([x, y]) => [x * c.width, y * c.height]);
+  const inPoly = (x: number, y: number) => {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i];
+      const [xj, yj] = poly[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+  // 冰排种子
+  const pts: { x: number; y: number }[] = [];
+  for (let i = 0; i < 34; i++) {
+    let x = 0;
+    let y = 0;
+    do {
+      x = rnd() * c.width;
+      y = rnd() * c.height;
+    } while (!inPoly(x, y));
+    pts.push({ x, y });
+  }
+  // Voronoi 边：中垂线上被其他种子约束出的线段（|p-a|≤|p-q| 逐点夹 t 区间）
+  const T = c.width + c.height;
+  const edges: { x0: number; y0: number; x1: number; y1: number }[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const a = pts[i];
+      const b = pts[j];
+      const mx = (a.x + b.x) / 2;
+      const my = (a.y + b.y) / 2;
+      let dx = b.x - a.x;
+      let dy = b.y - a.y;
+      const L = Math.hypot(dx, dy) || 1;
+      dx /= L;
+      dy /= L;
+      const nx = -dy;
+      const ny = dx;
+      let t0 = -T;
+      let t1 = T;
+      for (let k = 0; k < pts.length; k++) {
+        if (k === i || k === j) continue;
+        const q = pts[k];
+        const A = (mx - a.x) ** 2 + (my - a.y) ** 2 - ((mx - q.x) ** 2 + (my - q.y) ** 2);
+        const B = 2 * (nx * (a.x - q.x) + ny * (a.y - q.y));
+        if (Math.abs(B) < 1e-9) {
+          if (A > 0) t1 = -1;
+          continue;
+        }
+        const tc = -A / B;
+        if (B > 0) t1 = Math.min(t1, tc);
+        else t0 = Math.max(t0, tc);
+      }
+      if (t0 < t1) edges.push({ x0: mx + nx * t0, y0: my + ny * t0, x1: mx + nx * t1, y1: my + ny * t1 });
+    }
+  }
+  g.save();
+  g.beginPath();
+  poly.forEach(([x, y], idx) => (idx ? g.lineTo(x, y) : g.moveTo(x, y)));
+  g.closePath();
+  g.clip();
+  const jit = () => (rnd() - 0.5) * 2;
+  for (const e of edges) {
+    const len = Math.hypot(e.x1 - e.x0, e.y1 - e.y0);
+    if (len < 26) continue;
+    // 抖动 + 二次曲线平滑：主裂不是尺子直线
+    const steps = Math.max(2, Math.round(len / 34));
+    const nodes: [number, number][] = [];
+    for (let s = 0; s <= steps; s++) {
+      const k = s / steps;
+      nodes.push([e.x0 + (e.x1 - e.x0) * k + jit() * 3.4, e.y0 + (e.y1 - e.y0) * k + jit() * 3.4]);
+    }
+    const path = new Path2D();
+    path.moveTo(nodes[0][0], nodes[0][1]);
+    for (let s = 1; s < nodes.length - 1; s++) {
+      const xc = (nodes[s][0] + nodes[s + 1][0]) / 2;
+      const yc = (nodes[s][1] + nodes[s + 1][1]) / 2;
+      path.quadraticCurveTo(nodes[s][0], nodes[s][1], xc, yc);
+    }
+    g.strokeStyle = 'rgba(206,226,238,0.10)';
+    g.lineWidth = 5;
+    g.stroke(path); // 宽软底：裂纹下的反光带
+    g.strokeStyle = 'rgba(88,116,140,0.32)';
+    g.lineWidth = 1.2;
+    g.stroke(path); // 主裂暗线
+    g.save();
+    g.translate(1.1, -1.1);
+    g.strokeStyle = 'rgba(255,255,255,0.16)';
+    g.lineWidth = 0.8;
+    g.stroke(path); // 偏移高光棱：裂纹立体感
+    g.restore();
+    // 次级枝裂：从主裂中段斜出去的短细纹
+    if (rnd() < 0.55) {
+      const k = 0.3 + rnd() * 0.4;
+      const bx = e.x0 + (e.x1 - e.x0) * k;
+      const by = e.y0 + (e.y1 - e.y0) * k;
+      const base = Math.atan2(e.y1 - e.y0, e.x1 - e.x0);
+      const ang = base + (rnd() < 0.5 ? 1 : -1) * (0.6 + rnd() * 0.6);
+      const bl = 46 + rnd() * 80;
+      const bend = (rnd() - 0.5) * 0.8;
+      const bpath = new Path2D();
+      bpath.moveTo(bx, by);
+      bpath.quadraticCurveTo(
+        bx + Math.cos(ang + bend * 0.5) * bl * 0.5,
+        by + Math.sin(ang + bend * 0.5) * bl * 0.5,
+        bx + Math.cos(ang + bend) * bl,
+        by + Math.sin(ang + bend) * bl,
+      );
+      g.strokeStyle = 'rgba(110,138,160,0.2)';
+      g.lineWidth = 0.7;
+      g.stroke(bpath);
+    }
+  }
+  // 霜斑：几块极淡的白色薄膜，冰面的呼吸感
+  for (let i = 0; i < 7; i++) {
+    let x = 0;
+    let y = 0;
+    do {
+      x = rnd() * c.width;
+      y = rnd() * c.height;
+    } while (!inPoly(x, y));
+    const r = 60 + rnd() * 120;
+    const grd = g.createRadialGradient(x, y, 0, x, y, r);
+    grd.addColorStop(0, 'rgba(246,250,254,0.05)');
+    grd.addColorStop(1, 'rgba(246,250,254,0)');
+    g.fillStyle = grd;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  g.restore();
   // 积雪盖：软白椭圆压在荷叶/石头/草丛的上缘（比例坐标取自 PERCH_SEEDS 一带的落点）
   const spots: [number, number, number][] = [
     // 左上莲叶群
