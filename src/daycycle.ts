@@ -2,10 +2,12 @@
 // 层序在鱼/背景之上、涟漪与雾之下——夜里涟漪和雾仍亮（月色）。
 import { Sprite, Texture } from 'pixi.js';
 
-// [小时, multiply 颜色]；白 = 原画不变
+// [小时, multiply 颜色]；白 = 原画不变。黄昏段（17.5~20h）是真实的金色时刻：
+// 斜阳把画面染成暖金，落日后余晖转玫瑰棕，再沉入暮色灰紫——不回到浓琥珀的老问题。
 const KEYS: [number, number][] = [
-  [0, 0x33415e], [4.5, 0x33415e], [5.5, 0x9a92a6], [7, 0xe8e2d8], [8, 0xffffff],
-  [16.5, 0xffffff], [18, 0xd9a978], [19.5, 0x8a6a72], [21, 0x33415e], [24, 0x33415e],
+  [0, 0x455482], [4.5, 0x455482], [5.5, 0x9a92a6], [7, 0xe8e2d8], [8, 0xffffff],
+  [16, 0xfffaf0], [17.5, 0xf2dcba], [18.6, 0xe4c298], [19.3, 0xd4ab90], [19.9, 0xb093a0],
+  [21, 0x455482], [24, 0x455482],
 ];
 
 function lerpHex(a: number, b: number, k: number): number {

@@ -1,7 +1,7 @@
-// 时钟/农历小组件：DOM 水印式（楷体+白晕），右上角；夜间自动换浅色字。
-// 农历/节气用 lunar-javascript（Solar→Lunar）。
+// 时钟/农历小组件：DOM 水印式，右上角；农历/节气用 lunar-javascript（Solar→Lunar）。
+// 可读性方案参照 fish-d 的时钟（浅色字+深影+错版衬影，昼夜一套通吃）：
+// 宣纸米白字 + 淡墨柔影 + 淡青错版衬影（版画压印感），水墨风。
 import { Solar } from 'lunar-javascript';
-import { isNight } from './daycycle';
 
 const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -15,16 +15,17 @@ export class ClockWidget {
     const style = document.createElement('style');
     style.textContent = `
       .koi-widget {
-        position: fixed; top: 26px; right: 34px; text-align: right;
-        color: #2f3e36; font-family: "Kaiti SC", "STKaiti", "KaiTi", serif;
+        position: fixed; top: 5.2vh; right: 3.2vw; text-align: right;
+        color: rgba(246,250,243,.95); font-family: "Kaiti SC", "STKaiti", "KaiTi", serif;
         user-select: none; pointer-events: none; z-index: 10;
-        text-shadow: 0 0 8px rgba(255,255,255,.6), 0 0 2px rgba(255,255,255,.5);
-        transition: color .8s, text-shadow .8s;
+        text-shadow:
+          1.5px 2.5px 0 rgba(126,196,184,.28),
+          2px 5px 14px rgba(10,36,32,.5),
+          -1px -1px 2px rgba(10,36,32,.35);
       }
-      .koi-widget.koi-night { color: #dfe4da; text-shadow: 0 0 8px rgba(20,35,50,.8); }
-      .koi-time { font-size: 42px; letter-spacing: 5px; line-height: 1; opacity: .9; }
-      .koi-date { font-size: 15px; margin-top: 7px; letter-spacing: 2px; opacity: .75; }
-      .koi-lunar { font-size: 15px; margin-top: 2px; letter-spacing: 2px; opacity: .75; }
+      .koi-time { font-size: clamp(34px, 6.4vmin, 72px); font-weight: 600; letter-spacing: 5px; line-height: 1; }
+      .koi-date { font-size: clamp(13px, 2.2vmin, 19px); margin-top: .35em; letter-spacing: 3px; opacity: .92; }
+      .koi-lunar { font-size: clamp(13px, 2.2vmin, 19px); margin-top: .15em; letter-spacing: 3px; opacity: .8; }
     `;
     document.head.appendChild(style);
     const el = document.createElement('div');
@@ -51,7 +52,6 @@ export class ClockWidget {
       hh = now.getHours();
       mm = now.getMinutes();
     }
-    const hour = hourOverride ?? hh + mm / 60;
     this.time.textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
     this.date.textContent = `${now.getMonth() + 1}月${now.getDate()}日 ${WEEK[now.getDay()]}`;
     try {
@@ -61,7 +61,6 @@ export class ClockWidget {
     } catch {
       this.lunar.textContent = '';
     }
-    this.el.classList.toggle('koi-night', isNight(hour));
   }
 
   start(hourOverride?: number | null) {

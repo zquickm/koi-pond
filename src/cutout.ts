@@ -312,3 +312,44 @@ export function rotateToHeadLeft(cv: HTMLCanvasElement, forward: number): HTMLCa
 export function tex(cv: HTMLCanvasElement): Texture {
   return Texture.from(cv);
 }
+
+/** 锦鲤花色：red=原色红白，gold=红斑转金，sumi=整尾墨鲤 */
+export type KoiVariant = 'red' | 'gold' | 'sumi';
+
+/**
+ * 花色重映射（保持水墨调性，不改明暗结构）：
+ * - gold：暖色红斑沿亮度映射到 金色 ramp（深金→浅金），软掩膜过渡避免硬边
+ * - sumi：全尾压进墨色 ramp，红斑自然沉为深墨斑，白身变淡墨
+ */
+export function reblushKoi(cv: HTMLCanvasElement, variant: KoiVariant): HTMLCanvasElement {
+  if (variant === 'red') return cv;
+  const g = cv.getContext('2d', { willReadFrequently: true })!;
+  const id = g.getImageData(0, 0, cv.width, cv.height);
+  const d = id.data;
+  const smooth = (x: number) => {
+    const t = Math.max(0, Math.min(1, x));
+    return t * t * (3 - 2 * t);
+  };
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] === 0) continue;
+    const r = d[i];
+    const gg = d[i + 1];
+    const b = d[i + 2];
+    const L = (r * 0.299 + gg * 0.587 + b * 0.114) / 255;
+    if (variant === 'gold') {
+      const w = smooth((r - Math.max(gg, b)) / 55); // 暖色程度掩膜
+      if (w <= 0) continue;
+      const Ln = smooth((L - 0.2) / 0.62);
+      d[i] += (0x8a + (0xf5 - 0x8a) * Ln - r) * w;
+      d[i + 1] += (0x5c + (0xd8 - 0x5c) * Ln - gg) * w;
+      d[i + 2] += (0x1e + (0x7c - 0x1e) * Ln - b) * w;
+    } else {
+      const Ln = smooth((L * 0.5) / 0.9);
+      d[i] = 0x16 + (0x9a - 0x16) * Ln;
+      d[i + 1] = 0x1c + (0xa6 - 0x1c) * Ln;
+      d[i + 2] = 0x1c + (0xa0 - 0x1c) * Ln;
+    }
+  }
+  g.putImageData(id, 0, 0);
+  return cv;
+}

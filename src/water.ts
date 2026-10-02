@@ -1,40 +1,70 @@
-// 水面：涟漪 = CPU 双缓冲波动方程（细网格、强阻尼、克制的扰动）。
-// 池塘底景已换成手绘水墨原画（自带焦散质感），本层只负责互动涟漪高光。
-// ponytail: CPU 网格 512×320（每帧 ~2ms，M4 富余）；要全屏位移折射时升级 GPU framebuffer，接口不变。
+// 水面：涟漪 = CPU 双缓冲波动方程（细网格、高阻尼、克制的扰动）。
+// 高度场每帧编码成位移图（R=X 梯度、G=Y 梯度、0.5 中性），交给 DisplacementFilter
+// 扭曲底图与鱼层——波纹靠折射显形，不叠任何白色。CPU 网格 512×320（M4 富余）。
 import { Sprite, Texture } from 'pixi.js';
+import type { PondZone } from './pondzone';
 
 const SIM_W = 512;
 const SIM_H = 320;
-const DAMP = 0.956;
-const CREST_T = 0.045;
+const DAMP = 0.972; // 高阻尼：环存续更久，荡得更远更从容
+const GRAD_K = 550; // 高度梯度 → 位移图字节的增益
 
 export class Water {
-  readonly highlight: Sprite;
   private cur = new Float32Array(SIM_W * SIM_H);
   private prev = new Float32Array(SIM_W * SIM_H);
-  private cv: HTMLCanvasElement;
+  private cv = (() => {
+    const c = document.createElement('canvas');
+    c.width = SIM_W;
+    c.height = SIM_H;
+    return c;
+  })();
+  /** 位移图精灵：R=X 梯度、G=Y 梯度、0.5 中性。须加入舞台（世界变换参与对齐），本身不可见 */
+  readonly waveMap = new Sprite(Texture.from(this.cv));
   private ctx: CanvasRenderingContext2D;
   private img: ImageData;
-  private nextAmbient = 18;
+
+  // 波纹扩散速度：模拟步进率 × 0.4——环扩散更慢、存续更久
+  private static readonly STEP = 1 / 60;
+  private acc = 0;
+  private pond: PondZone | null = null;
+  private mask: Uint8Array | null = null; // 水域掩码：1=水里，0=岸上（波传到岸即被吸收）
+  private lw = 0;
+  private lh = 0;
 
   constructor() {
-    this.cv = document.createElement('canvas');
-    this.cv.width = SIM_W;
-    this.cv.height = SIM_H;
-    this.ctx = this.cv.getContext('2d')!;
+    this.ctx = this.cv.getContext('2d', { willReadFrequently: true })!;
     this.img = this.ctx.createImageData(SIM_W, SIM_H);
-
-    this.highlight = new Sprite(Texture.from(this.cv));
-    this.highlight.blendMode = 'add';
-    this.highlight.alpha = 0.36;
+    const d = this.img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = 128; // 中性灰：无波处位移为 0
+      d[i + 1] = 128;
+      d[i + 3] = 255;
+    }
   }
 
-  layout(W: number, H: number) {
-    this.highlight.width = W;
-    this.highlight.height = H;
+  layout(W: number, H: number, pond?: PondZone) {
+    // 位移图铺满屏幕（calculateSpriteMatrix 按精灵世界变换对齐滤镜帧）
+    this.waveMap.position.set(0, 0);
+    this.waveMap.width = W;
+    this.waveMap.height = H;
+    // 水域掩码：按水岸多边形逐格预计算，波只在格子里传播，不过界
+    if (pond && (pond !== this.pond || W !== this.lw || H !== this.lh)) {
+      this.pond = pond;
+      this.lw = W;
+      this.lh = H;
+      const m = new Uint8Array(SIM_W * SIM_H);
+      for (let y = 0; y < SIM_H; y++) {
+        const sy = ((y + 0.5) / SIM_H) * H;
+        for (let x = 0; x < SIM_W; x++) {
+          const sx = ((x + 0.5) / SIM_W) * W;
+          m[y * SIM_W + x] = pond.probe(sx, sy).d > 4 ? 1 : 0;
+        }
+      }
+      this.mask = m;
+    }
   }
 
-  /** nx, ny ∈ [0,1]（归一化屏幕坐标）。默认小而轻。 */
+  /** 落一滴扰动：nx, ny ∈ [0,1]（归一化屏幕坐标），r 为网格单位半径 */
   drop(nx: number, ny: number, r = 1.8, strength = 0.5) {
     const cx = nx * SIM_W;
     const cy = ny * SIM_H;
@@ -47,13 +77,34 @@ export class Water {
   }
 
   step(dt: number) {
-    this.nextAmbient -= dt;
-    if (this.nextAmbient <= 0) {
-      // 极罕见的偶发涟漪（一片落叶），轻到几乎注意不到
-      this.drop(Math.random(), Math.random(), 1.4, 0.18);
-      this.nextAmbient = 14 + Math.random() * 16;
+    this.acc = Math.min(this.acc + dt * 0.4, Water.STEP * 3);
+    let stepped = false;
+    while (this.acc >= Water.STEP) {
+      this.acc -= Water.STEP;
+      this.simOne();
+      stepped = true;
     }
+    if (!stepped) return;
+    // 高度梯度 → 位移图（边框一圈保持中性，不写）
+    const d = this.img.data;
+    const c = this.cur;
+    for (let y = 1; y < SIM_H - 1; y++) {
+      const row = y * SIM_W;
+      for (let x = 1; x < SIM_W - 1; x++) {
+        const i = row + x;
+        const p = i * 4;
+        const gx = (c[i + 1] - c[i - 1]) * GRAD_K;
+        const gy = (c[i + SIM_W] - c[i - SIM_W]) * GRAD_K;
+        d[p] = 128 + Math.max(-127, Math.min(127, gx));
+        d[p + 1] = 128 + Math.max(-127, Math.min(127, gy));
+      }
+    }
+    this.ctx.putImageData(this.img, 0, 0);
+    const src = this.waveMap.texture.source as unknown as { update?: () => void };
+    src.update?.();
+  }
 
+  private simOne() {
     const { cur, prev } = this;
     for (let y = 1; y < SIM_H - 1; y++) {
       const row = y * SIM_W;
@@ -63,30 +114,17 @@ export class Water {
       }
     }
     [this.cur, this.prev] = [this.prev, this.cur];
-
-    // 高光着色：只有明显的波峰才显形，波谷极淡
-    const d = this.img.data;
-    const c = this.cur;
-    for (let i = 0, p = 0; i < c.length; i++, p += 4) {
-      const v = c[i];
-      if (v > CREST_T) {
-        const a = Math.min(1, (v - CREST_T) * 4);
-        d[p] = 235;
-        d[p + 1] = 245;
-        d[p + 2] = 240;
-        d[p + 3] = (a * 255) | 0;
-      } else if (v < -CREST_T) {
-        const a = Math.min(1, (-v - CREST_T) * 2.5);
-        d[p] = 30;
-        d[p + 1] = 60;
-        d[p + 2] = 55;
-        d[p + 3] = (a * 110) | 0;
-      } else {
-        d[p + 3] = 0;
+    // 岸线吸收：掩码外强制归零，波不过界（等效于岸反射）
+    const mask = this.mask;
+    if (mask) {
+      const cu = this.cur;
+      const pv = this.prev;
+      for (let i = 0; i < mask.length; i++) {
+        if (!mask[i]) {
+          cu[i] = 0;
+          pv[i] = 0;
+        }
       }
     }
-    this.ctx.putImageData(this.img, 0, 0);
-    const src = this.highlight.texture.source as unknown as { update?: () => void };
-    src.update?.();
   }
 }
