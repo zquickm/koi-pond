@@ -255,9 +255,9 @@ function softenGreen(im: HTMLImageElement, waterPoly: readonly (readonly [number
   g.drawImage(im, 0, 0);
   const W = c.width;
   const H = c.height;
-  // 水面掩码：1/4 分辨率逐格判定 + 一轮盒式平滑（岸边过渡柔一点）。
-  // 多边形先换算到画布像素、再向质心收缩 8%（腐蚀）：春图的叶子和 v8 标定边界不完全
-  // 重合，边界一圈保守按"岸"处理保持绿色，只有确定是深水的区域才转蓝。
+  // 水面掩码：1/8 分辨率逐格判定 + 三轮盒式平滑——软化成 30-60px 的缓坡过渡，
+  // 水陆交界不再有可辨认的色带。多边形先向质心收缩 8%（腐蚀）：春图的叶子和
+  // v8 标定边界不完全重合，边界一圈保守按"岸"处理保持绿色。
   const poly = waterPoly.map(([fx, fy]) => [fx * W, fy * H] as const);
   const cx = poly.reduce((a, [x]) => a + x, 0) / poly.length;
   const cy = poly.reduce((a, [, y]) => a + y, 0) / poly.length;
@@ -271,19 +271,28 @@ function softenGreen(im: HTMLImageElement, waterPoly: readonly (readonly [number
     }
     return inside;
   };
-  const mw = Math.ceil(W / 4);
-  const mh = Math.ceil(H / 4);
-  const mask = new Float32Array(mw * mh);
+  const CELL = 8;
+  const mw = Math.ceil(W / CELL);
+  const mh = Math.ceil(H / CELL);
+  let mask = new Float32Array(mw * mh);
   for (let j = 0; j < mh; j++) {
     for (let i = 0; i < mw; i++) {
       mask[j * mw + i] = inPoly(((i + 0.5) * W) / mw, ((j + 0.5) * H) / mh) ? 1 : 0;
     }
   }
-  const sm = new Float32Array(mask);
-  for (let j = 1; j < mh - 1; j++) {
-    for (let i = 1; i < mw - 1; i++) {
-      sm[j * mw + i] = (mask[j * mw + i] * 2 + mask[j * mw + i - 1] + mask[j * mw + i + 1] + mask[(j - 1) * mw + i] + mask[(j + 1) * mw + i]) / 6;
+  for (let pass = 0; pass < 3; pass++) {
+    const sm = new Float32Array(mw * mh);
+    for (let j = 0; j < mh; j++) {
+      for (let i = 0; i < mw; i++) {
+        const c0 = mask[j * mw + i];
+        const lft = i > 0 ? mask[j * mw + i - 1] : c0;
+        const rgt = i < mw - 1 ? mask[j * mw + i + 1] : c0;
+        const up = j > 0 ? mask[(j - 1) * mw + i] : c0;
+        const dn = j < mh - 1 ? mask[(j + 1) * mw + i] : c0;
+        sm[j * mw + i] = (c0 * 4 + lft + rgt + up + dn) / 8;
+      }
     }
+    mask = sm;
   }
   const d = g.getImageData(0, 0, W, H);
   const p = d.data;
@@ -299,7 +308,7 @@ function softenGreen(im: HTMLImageElement, waterPoly: readonly (readonly [number
       let r2 = l + (r - l) * 0.85;
       let g2 = l + (gg - l) * 0.85;
       let b2 = l + (b - l) * 0.85;
-      const m = sm[(y >> 2) * mw + (x >> 2)];
+      const m = Math.max(0, Math.min(1, mask[(y >> 3) * mw + (x >> 3)]));
       if (m > 0) {
         // 水面：绿区压缩映射进 184-208° 青蓝带（水色 133.9° 锚定夏水 190°）+ 去紫 + 增彩
         let rr = r / 255;
