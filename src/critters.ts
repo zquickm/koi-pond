@@ -409,6 +409,11 @@ export class Rainfall {
     this.H = H;
   }
 
+  /** 只读快照（?debug 核对用）：当前雨丝数 */
+  get dropCount() {
+    return this.drops.length;
+  }
+
   update(dt: number, k: number, onSplash?: (nx: number, ny: number) => void) {
     this.g.clear();
     this.container.visible = k > 0.02 || this.splashes.length > 0;
