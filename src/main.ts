@@ -10,7 +10,7 @@ import { darknessAt, DayTint } from './daycycle';
 import { ClockWidget } from './widget';
 import { Caustics } from './caustic';
 import { PERCHES, PondZone, ZONES } from './pondzone';
-import { bboxCrop, cropCanvas, cutoutCanvas, reblushKoi, regradeTeal, rotateToHeadLeft, splitComponents, tex, washTowardWhite } from './cutout';
+import { bboxCrop, cutoutCanvas, reblushKoi, rotateToHeadLeft, splitComponents, tex, washTowardWhite } from './cutout';
 import type { KoiVariant } from './cutout';
 import koi1Url from './assets/koi-1.png';
 import koi3Url from './assets/koi-3.png';
@@ -58,16 +58,19 @@ const loadImg = (url: string) =>
 const [bgDefaultI, bgSpringI, bgAutumnI, bgWinterI] = await Promise.all(
   [bgDefaultUrl, bgSpringUrl, bgAutumnUrl, bgWinterUrl].map(loadImg),
 );
-// 背景色调重映射到 fish-d 式青绿（亮度→teal 渐变），水墨纹理保留
-const bgWash = (im: HTMLImageElement) => tex(regradeTeal(washTowardWhite(cropCanvas(im, { x: 0, y: 0, w: 1, h: 1 }), 0.12), 0.78));
 const bgTexs: Record<string, Texture> = {
-  // season id 仍沿用 'v7'（URL ?season=v7 与壳配置的既有取值）；v7=默认荷塘=夏景，用原画不洗白
+  // season id 仍沿用 'v7'（URL ?season=v7 与壳配置的既有取值）；v7=默认荷塘=夏景。
+  // 四季图与 v7 是同一构图的换季重绘，直接用原画不洗白——换季交叉溶解时色调才连得上。
   v7: Texture.from(bgDefaultI),
-  spring: bgWash(bgSpringI),
-  autumn: bgWash(bgAutumnI),
-  winter: bgWash(bgWinterI),
+  spring: Texture.from(bgSpringI),
+  autumn: Texture.from(bgAutumnI),
+  winter: Texture.from(bgWinterI),
 };
 const bottom = new Sprite(bgTexs[cfg.season] ?? bgTexs.v7);
+const bottomNext = new Sprite(); // 换季溶解：目标季图淡入，结束后落到底图
+bottomNext.alpha = 0;
+const pondLayer = new Container(); // 底图两层一起做折射与摆放
+pondLayer.addChild(bottom, bottomNext);
 const pond = new PondZone(ZONES[cfg.season] ?? ZONES.v7, PERCHES[cfg.season] ?? []);
 const water = new Water();
 
@@ -86,14 +89,14 @@ function redrawWater() {
   waterMask.poly(pts).fill({ color: 0xffffff });
 }
 
-/** 底图 cover-fit 摆放；水面围栏跟着同一套变换走（鱼出生前也要先摆一次） */
+/** 底图 cover-fit 摆放（含换季溶解层）；水面围栏跟着同一套变换走（鱼出生前也要先摆一次） */
 function placeBottom(W: number, H: number) {
   const bw = bottom.texture.width;
   const bh = bottom.texture.height;
   const s = Math.max(W / bw, H / bh);
-  bottom.scale.set(s);
-  bottom.position.set((W - bw * s) / 2, (H - bh * s) / 2);
-  pond.layout(bottom.x, bottom.y, s, bw, bh);
+  pondLayer.scale.set(s);
+  pondLayer.position.set((W - bw * s) / 2, (H - bh * s) / 2);
+  pond.layout(pondLayer.x, pondLayer.y, s, bw, bh);
   redrawWater();
 }
 
@@ -123,7 +126,7 @@ const tadArts = splitComponents(cutoutCanvas(tadI), { headRule: 'wide-half' }).m
 placeBottom(app.screen.width, app.screen.height);
 // 折射：波纹位移图扭曲底图与鱼层——真实水纹，无白色叠加
 const dispBottom = new DisplacementFilter({ sprite: water.waveMap, scale: 40 });
-bottom.filters = [dispBottom];
+pondLayer.filters = [dispBottom];
 const school = new School(koiTexs, cfg.fish, pond);
 const dispSchool = new DisplacementFilter({ sprite: water.waveMap, scale: 40 });
 school.layer.filters = [dispSchool];
@@ -171,7 +174,7 @@ const lightning = new Sprite(Texture.WHITE);
 lightning.tint = 0xf5f8ff;
 lightning.alpha = 0;
 app.stage.addChild(
-  bottom,
+  pondLayer,
   water.waveMap,
   waterBody,
   waterFx,
@@ -217,6 +220,28 @@ function feedAt(x: number, y: number) {
   wake(fx / app.screen.width, fy / app.screen.height, 1.8, 0.35);
 }
 window.addEventListener('pointerdown', (e) => feedAt(e.clientX, e.clientY));
+
+// —— 换季：交叉溶解 10s；数字键 1-5 现场切（壳面板日后接同一入口 setSeason）——
+// 1/3 都是夏（v7=默认荷塘=夏景）、2 春、4 秋、5 冬
+let seasonCur: string = cfg.season;
+let seasonNext = '';
+let fadeLeft = 0;
+const SEASON_FADE = 10;
+function setSeason(id: string) {
+  if (id === seasonCur || !bgTexs[id]) return;
+  seasonNext = id;
+  bottomNext.texture = bgTexs[id];
+  bottomNext.alpha = 0;
+  fadeLeft = SEASON_FADE;
+  // 围栏与落脚点跟目标季节走（溶解刚开始就切，肉眼无感）
+  pond.setZone(ZONES[id] ?? ZONES.v7, PERCHES[id] ?? []);
+  placeBottom(app.screen.width, app.screen.height);
+}
+const KEY_SEASON: Record<string, string> = { '1': 'v7', '2': 'spring', '3': 'v7', '4': 'autumn', '5': 'winter' };
+window.addEventListener('keydown', (e) => {
+  const id = KEY_SEASON[e.key];
+  if (id) setSeason(id);
+});
 
 function layout(W: number, H: number) {
   placeBottom(W, H);
@@ -336,6 +361,17 @@ app.ticker.add((tk) => {
     lastH = H;
     layout(W, H);
   }
+  // 换季溶解推进：目标季图淡入，走完后落到底图、复位溶解层
+  if (fadeLeft > 0) {
+    fadeLeft -= dt;
+    bottomNext.alpha = Math.min(1, 1 - fadeLeft / SEASON_FADE);
+    if (fadeLeft <= 0) {
+      bottom.texture = bgTexs[seasonNext];
+      bottomNext.alpha = 0;
+      seasonCur = seasonNext;
+      seasonNext = '';
+    }
+  }
   // 悬停撒食已撤（2026-10-02）：只有点击才有食物
 
   water.step(dt);
@@ -343,7 +379,7 @@ app.ticker.add((tk) => {
   // 夏天=默认荷塘（v7）：蜻蜓在夏景白天 7:00–18:30 造访（?dfly=1 强制预览）；
   // 青蛙在夏景昼夜都出来（夜里鼓腮正是蛙鸣，?frog=1 强制预览）——同一套"夏天"定义
   const nfHour = cfg.hour ?? nowHour();
-  const summerScene = cfg.season === 'v7';
+  const summerScene = seasonCur === 'v7';
   const dflyOn = seasonQuery.has('dfly') || (summerScene && nfHour >= 7 && nfHour <= 18.5);
   const frogOn = seasonQuery.has('frog') || summerScene;
   // 焦散推进：正午最亮、夜里只剩月光级光网（fish-d dayPhase causticMul 1.0↔0.22）
@@ -364,19 +400,19 @@ app.ticker.add((tk) => {
   // 萤火虫按中国真实情况（2026-10-03）：日落后约 19:20 渐现、上半夜最盛，午夜后渐稀、1:30 前收场；
   // 密度=夏景(默认)12 只、春末/初秋零星 4 只、冬无（萤火虫盛发季就是夏天，冬天没有萤火虫）
   const ffK = nfHour >= 12 ? Math.max(0, Math.min(1, nfHour - 19.2)) : Math.max(0, Math.min(1, 1.5 - nfHour));
-  const ffCount = cfg.season === 'v7' ? 12 : cfg.season === 'spring' || cfg.season === 'autumn' ? 4 : 0;
+  const ffCount = seasonCur === 'v7' ? 12 : seasonCur === 'spring' || seasonCur === 'autumn' ? 4 : 0;
   fireflies.update(T, ffK, ffCount);
   // 季节氛围：春季小雨 / 夏季随机小雨·大雨 / 冬季随机降雪，每场约 1 分钟、间隔随机
-  if (cfg.season === 'spring' || cfg.season === 'v7' || cfg.season === 'winter') {
+  if (seasonCur === 'spring' || seasonCur === 'v7' || seasonCur === 'winter') {
     seasonT -= dt;
     if (seasonT <= 0 && seasonLeft <= 0) {
       seasonLeft = 55 + Math.random() * 15;
       seasonElapsed = 0;
       seasonT = 50 + Math.random() * 130;
       // 春天=小雨（2026-10-03 拍板）；夏天小雨·大雨各半
-      rainPeak = cfg.season === 'v7' ? (Math.random() < 0.5 ? 0.4 : 1) : 0.4;
+      rainPeak = seasonCur === 'v7' ? (Math.random() < 0.5 ? 0.4 : 1) : 0.4;
       // 只有大雨场配闪电
-      boltLeft = cfg.season === 'v7' && rainPeak === 1 ? 1 + ((Math.random() < 0.5 ? 1 : 0)) : 0;
+      boltLeft = seasonCur === 'v7' && rainPeak === 1 ? 1 + ((Math.random() < 0.5 ? 1 : 0)) : 0;
       boltT = 3 + Math.random() * 14;
     }
   }
@@ -394,7 +430,7 @@ app.ticker.add((tk) => {
     seasonElapsed += dt;
     const ramp = Math.max(0, Math.min(1, seasonElapsed / 6, seasonLeft / 6));
     // 预览参数优先于季节：?snow 在春天也下雪，?rain 在冬天也下雨
-    const rainOn = forceRain || (!forceSnow && (cfg.season === 'spring' || cfg.season === 'v7'));
+    const rainOn = forceRain || (!forceSnow && (seasonCur === 'spring' || seasonCur === 'v7'));
     if (rainOn) {
       // 可见雨丝 + 落点水花；部分落点转化成真实涟漪（雨强峰值只作用于雨）
       rainfall.update(dt, ramp * rainPeak, (nx, ny) => {
@@ -420,7 +456,7 @@ app.ticker.add((tk) => {
         return wet;
       });
     }
-  } else if (cfg.season === 'winter' || forceSnow) {
+  } else if (seasonCur === 'winter' || forceSnow) {
     snowfall.update(dt, T, 0);
   }
   // 雪压在 dayTint 之上，不受夜景调色，所以要按"此刻夜色有多深"单独压淡：

@@ -102,6 +102,12 @@ export class PondZone {
     this.H = H;
   }
 
+  /** 运行时换季：替换围栏与落脚点（cover-fit 变换不变，随后调 layout 重算即可） */
+  setZone(poly: Poly, seeds: readonly (readonly [number, number])[]) {
+    this.poly = poly;
+    this.seeds = seeds;
+  }
+
   /** 屏幕坐标的水岸多边形（扁平 [x0,y0,x1,y1,...]），layout 后有效；供水色绘制 */
   get screenPoly(): number[] {
     return this.scr;
