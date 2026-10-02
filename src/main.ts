@@ -230,6 +230,8 @@ function layout(W: number, H: number) {
   frog.layout(W, H, pond);
   veil.width = W;
   veil.height = H;
+  lightning.width = W; // Texture.WHITE 只有 1x1，不铺满全屏就看不见
+  lightning.height = H;
   dayTint.layout(W, H);
   for (const f of fogs) {
     f.width = W * 1.1;
