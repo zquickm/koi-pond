@@ -6,7 +6,7 @@ import { School } from './fish';
 import { Frog } from './lily';
 import { Critters, Fireflies, Rainfall, Snowfall } from './critters';
 import { FoodLayer } from './food';
-import { DayTint } from './daycycle';
+import { darknessAt, DayTint } from './daycycle';
 import { ClockWidget } from './widget';
 import { Caustics } from './caustic';
 import { PERCHES, PondZone, ZONES } from './pondzone';
@@ -367,6 +367,10 @@ app.ticker.add((tk) => {
   } else if (cfg.season === 'winter' || forceSnow) {
     snowfall.update(dt, T, 0);
   }
+  // 雪压在 dayTint 之上，不受夜景调色，所以要按"此刻夜色有多深"单独压淡：
+  // 不压的话白点在深蓝夜色里比白天还跳（2026-10-02 反馈：晚上的雪太白了）。
+  // 用底图当前乘色算深浅，而不是用萤火虫的 nightK——那个 19:12 就满了，那会儿天还暖着。
+  snowfall.container.alpha = 1 - 0.85 * darknessAt(nfHour);
   // 昼夜：?hour=22 可强制预览
   dayTint.update(cfg.hour ?? nowHour());
   fogs.forEach((f, i) => {

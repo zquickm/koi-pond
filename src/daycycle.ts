@@ -37,6 +37,13 @@ export function isNight(hour: number): boolean {
   return hour >= 19 || hour < 5.5;
 }
 
+/** 此刻夜色有多深（0=白天原画，1=最暗）：给压在 dayTint 之上、不受夜景调色的层（雪）按夜色压淡用 */
+export function darknessAt(hour: number): number {
+  const c = tintAt(hour);
+  const lum = 0.299 * ((c >> 16) & 255) + 0.587 * ((c >> 8) & 255) + 0.114 * (c & 255);
+  return 1 - lum / 255;
+}
+
 export class DayTint {
   readonly sp = new Sprite(Texture.WHITE);
   constructor() {
