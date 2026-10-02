@@ -503,6 +503,112 @@ export class Rainfall {
   }
 }
 
+/** 冬季点击互动：点哪儿哪儿下雪——撒一把雪粒、原地积成堆，同一处连点 5 下长出小雪人。
+ *  冬天鱼在冰下吃不到食，点击从投喂换成玩雪（2026-10-03 用户点子）。 */
+export class SnowPiles {
+  readonly container = new Container();
+  private blob: Texture;
+  private piles: { x: number; y: number; lvl: number; blob: Sprite }[] = [];
+  private men: Container[] = [];
+  private flakes: { sp: Sprite; x: number; y: number; vx: number; vy: number; life: number }[] = [];
+
+  constructor() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d')!;
+    const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grd.addColorStop(0, 'rgba(250,253,255,0.95)');
+    grd.addColorStop(0.6, 'rgba(246,250,254,0.55)');
+    grd.addColorStop(1, 'rgba(242,248,253,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 64, 64);
+    this.blob = Texture.from(c);
+  }
+
+  /** 点了一下：撒一把雪 + 并入附近的堆加高；第 5 下堆出小雪人 */
+  click(x: number, y: number) {
+    for (let i = 0; i < 9; i++) {
+      const sp = new Sprite(this.blob);
+      sp.anchor.set(0.5);
+      sp.scale.set(0.1 + Math.random() * 0.06);
+      this.container.addChild(sp);
+      this.flakes.push({
+        sp,
+        x: x + (Math.random() - 0.5) * 120,
+        y: y - 60 - Math.random() * 120,
+        vx: (Math.random() - 0.5) * 24,
+        vy: 60 + Math.random() * 50,
+        life: 0.9 + Math.random() * 0.7,
+      });
+    }
+    const MERGE = 70;
+    let p = this.piles.find((q) => Math.hypot(q.x - x, q.y - y) < MERGE);
+    if (!p) {
+      // ponytail: 上限 24 堆（雪人不限），满了新位置不再积雪；要更多改这里
+      if (this.piles.length >= 24) return;
+      const sp = new Sprite(this.blob);
+      sp.anchor.set(0.5, 0.78);
+      this.container.addChild(sp);
+      p = { x, y, lvl: 0, blob: sp };
+      this.piles.push(p);
+    }
+    p.lvl++;
+    p.blob.position.set(p.x, p.y);
+    const r = 10 + p.lvl * 4.5;
+    p.blob.scale.set(r / 32, (r * 0.62) / 32);
+    p.blob.alpha = 0.85;
+    if (p.lvl === 5) this.buildMan(p);
+  }
+
+  /** 三球小雪人：软白球叠罗汉 + 墨点眼扣 + 枯枝臂 + 一点朱砂围巾 */
+  private buildMan(p: { x: number; y: number }) {
+    const man = new Container();
+    const mk = (r: number, x: number, y: number) => {
+      const s = new Sprite(this.blob);
+      s.anchor.set(0.5);
+      s.position.set(x, y);
+      s.scale.set(r / 32);
+      man.addChild(s);
+    };
+    mk(24, 0, -18);
+    mk(16, 0, -44);
+    mk(10.5, 0, -63);
+    const g = new Graphics();
+    g.circle(-3.4, -65, 1.5).circle(3.4, -65, 1.5).fill({ color: 0x37474f }); // 眼
+    g.circle(0, -47, 1.4).circle(0, -41, 1.4).fill({ color: 0x37474f }); // 扣子
+    g.moveTo(-13, -46).lineTo(-26, -56).moveTo(13, -46).lineTo(26, -56).stroke({ color: 0x5d4a3a, width: 1.4 }); // 枯枝臂
+    g.arc(0, -54.5, 4.6, Math.PI * 0.15, Math.PI * 0.85).stroke({ color: 0xb0524a, width: 2.2 }); // 朱砂围巾
+    man.addChild(g);
+    man.position.set(p.x, p.y + 4);
+    this.container.addChild(man);
+    this.men.push(man);
+  }
+
+  update(dt: number) {
+    for (const f of this.flakes) {
+      f.life -= dt;
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      f.vy += 60 * dt;
+      f.sp.position.set(f.x, f.y);
+      f.sp.alpha = Math.max(0, Math.min(1, f.life * 1.6));
+    }
+    this.flakes = this.flakes.filter((f) => {
+      if (f.life > 0) return true;
+      f.sp.destroy();
+      return false;
+    });
+  }
+
+  /** 离开冬季/窗口重排时清场（雪堆雪人都是屏幕坐标） */
+  clear() {
+    for (const p of this.piles) p.blob.destroy();
+    for (const m of this.men) m.destroy();
+    this.piles = [];
+    this.men = [];
+  }
+}
+
 export class Critters {
   readonly water = new Container(); // 蝌蚪（鱼层之下）
   readonly air = new Container(); // 蜻蜓（最上层）

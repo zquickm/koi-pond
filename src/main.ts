@@ -4,7 +4,7 @@ import { makeFogTexture, WATER_TINT } from './bottom';
 import { Water } from './water';
 import { School } from './fish';
 import { Frog } from './lily';
-import { Critters, Fireflies, Rainfall, Snowfall } from './critters';
+import { Critters, Fireflies, Rainfall, Snowfall, SnowPiles } from './critters';
 import { FoodLayer } from './food';
 import { darknessAt, DayTint } from './daycycle';
 import { ClockWidget } from './widget';
@@ -253,6 +253,8 @@ const bgTexs: Record<string, Texture> = {
 // 冰层：盖在鱼之上（鱼在冰下），冬季才浮现，alpha 在 ticker 里跟换季溶解同步
 const iceLayer = new Sprite(winterBaked.ice);
 iceLayer.alpha = 0;
+// 冬季点击玩雪：撒雪 + 积雪成堆 + 堆雪人（鱼在冰下吃不到食，点击不再是投喂）
+const snowPiles = new SnowPiles();
 const bottom = new Sprite(bgTexs[cfg.season] ?? bgTexs.v7);
 const bottomNext = new Sprite(); // 换季溶解：目标季图淡入，结束后落到底图
 bottomNext.alpha = 0;
@@ -372,6 +374,7 @@ app.stage.addChild(
   foodLayer.container,
   frog.sp,
   iceLayer, // 冰面：鱼/食/蛙都压在它下面（冬季鱼在冰下）
+  snowPiles.container, // 冰上的雪堆与小雪人
   veil,
   dayTint.sp,
   ...fogs,
@@ -413,7 +416,14 @@ function feedAt(x: number, y: number) {
   foodLayer.spawn(fx, fy, 4);
   wake(fx / app.screen.width, fy / app.screen.height, 1.8, 0.35);
 }
-window.addEventListener('pointerdown', (e) => feedAt(e.clientX, e.clientY));
+window.addEventListener('pointerdown', (e) => {
+  // 冬天冰封：鱼吃不到食，点击改玩雪（撒雪/积堆/堆雪人）
+  if (seasonCur === 'winter') {
+    snowPiles.click(e.clientX, e.clientY);
+    return;
+  }
+  feedAt(e.clientX, e.clientY);
+});
 
 // —— 换季：交叉溶解 10s；数字键 1-5 现场切（壳面板日后接同一入口 setSeason）——
 // 1/3 都是夏（v7=默认荷塘=夏景）、2 春、4 秋、5 冬
@@ -440,6 +450,7 @@ window.addEventListener('keydown', (e) => {
 function layout(W: number, H: number) {
   placeBottom(W, H);
   pond.setViewport(W, H);
+  snowPiles.clear(); // 雪堆是屏幕坐标，窗口变了就清场重堆
   water.layout(W, H, pond);
   caustics.layout(W, H);
   swells.layout(W, H);
@@ -576,6 +587,10 @@ app.ticker.add((tk) => {
     : seasonCur === 'winter'
       ? 1
       : 0;
+  // 点击积雪跟冰层同生共灭：冰化了雪堆雪人也跟着没了
+  snowPiles.container.alpha = iceLayer.alpha;
+  if (iceLayer.alpha <= 0) snowPiles.clear();
+  snowPiles.update(dt);
   // 悬停撒食已撤（2026-10-02）：只有点击才有食物
 
   water.step(dt);
