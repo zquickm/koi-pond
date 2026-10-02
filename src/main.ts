@@ -242,9 +242,9 @@ function bakeWinterArt(): { base: Texture; ice: Texture } {
   return { base: Texture.from(c), ice: Texture.from(iceC) };
 }
 const winterBaked = bakeWinterArt();
-/** 春图校色（2026-10-03 "太绿"→收完又说"要像夏天那样丰富"）：选择性彩度调整——
- *  绿通道偏离亮度的部分收 8%（去绿火气），红/蓝偏离放大 18%（粉荷、水色更跳），
- *  色相不变、构图纹理不动，出来的绿沉稳、别的颜色更丰富。 */
+/** 春图校色（2026-10-03 三轮反馈收敛到这）：通道混合调色——
+ *  绿色彩度收 22%，卸下来的绿转移给蓝（池塘偏蓝）；红蓝彩度放大（粉荷水色丰富）；
+ *  低饱和暗部整体压 10%（石头/墨色更沉）。色相构图不动。 */
 function softenGreen(im: HTMLImageElement): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = im.width;
@@ -253,11 +253,20 @@ function softenGreen(im: HTMLImageElement): HTMLCanvasElement {
   g.drawImage(im, 0, 0);
   const d = g.getImageData(0, 0, c.width, c.height);
   const p = d.data;
+  const cl = (v: number) => Math.max(0, Math.min(255, v));
   for (let i = 0; i < p.length; i += 4) {
     const l = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
-    p[i] = Math.max(0, Math.min(255, l + (p[i] - l) * 1.18));
-    p[i + 1] = Math.max(0, Math.min(255, l + (p[i + 1] - l) * 0.92));
-    p[i + 2] = Math.max(0, Math.min(255, l + (p[i + 2] - l) * 1.18));
+    const gd = p[i + 1] - l;
+    p[i] = cl(l + (p[i] - l) * 1.16);
+    p[i + 1] = cl(l + gd * 0.78);
+    p[i + 2] = cl(l + (p[i + 2] - l) * 1.26 + gd * 0.22); // 绿的减量喂给蓝：池塘转蓝
+    // 石头：低彩且偏暗的像素压黑一成
+    const sat = Math.abs(p[i] - l) + Math.abs(p[i + 1] - l) + Math.abs(p[i + 2] - l);
+    if (sat < 26 && l < 150) {
+      p[i] *= 0.9;
+      p[i + 1] *= 0.9;
+      p[i + 2] *= 0.9;
+    }
   }
   g.putImageData(d, 0, 0);
   return c;
