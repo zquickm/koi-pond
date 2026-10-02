@@ -21,6 +21,7 @@ import bgWinterUrl from './assets/bg-winter.png';
 import frogUrl from './assets/frog.jpg';
 import tadUrl from './assets/tadpoles.jpg';
 import dflyUrl from './assets/dragonfly.jpg';
+import iceUrl from './assets/bg-winter-ice.png';
 
 const cfg = loadConfig();
 // ?rain / ?rain=light|heavy / ?snow / ?calm 预览开关（可跨季节）
@@ -55,16 +56,57 @@ const loadImg = (url: string) =>
     im.onerror = rej;
     im.src = url;
   });
-const [bgDefaultI, bgSpringI, bgAutumnI, bgWinterI] = await Promise.all(
-  [bgDefaultUrl, bgSpringUrl, bgAutumnUrl, bgWinterUrl].map(loadImg),
+const [bgDefaultI, bgSpringI, bgAutumnI, bgWinterI, iceI] = await Promise.all(
+  [bgDefaultUrl, bgSpringUrl, bgAutumnUrl, bgWinterUrl, iceUrl].map(loadImg),
 );
+
+/** 冬季底图一次性烘焙：冬画 + 冰面叠加（预烘焙图，湖面反光/霜花/冰排，岸边自带软边）
+ *  + 荷叶/石头/草丛上缘的积雪。都画进同一张贴图，换季溶解时天然同步。 */
+function makeWinterTex(): Texture {
+  const c = document.createElement('canvas');
+  c.width = bgWinterI.width;
+  c.height = bgWinterI.height;
+  const g = c.getContext('2d')!;
+  g.drawImage(bgWinterI, 0, 0);
+  g.drawImage(iceI, 0, 0, c.width, c.height);
+  // 积雪盖：软白椭圆压在荷叶/石头/草丛的上缘（比例坐标取自 PERCH_SEEDS 一带的落点）
+  const spots: [number, number, number][] = [
+    // 左上莲叶群
+    [0.03, 0.05, 46], [0.135, 0.05, 40], [0.035, 0.115, 36], [0.075, 0.145, 30],
+    // 右上石滩与崖石
+    [0.85, 0.04, 42], [0.928, 0.135, 34], [0.908, 0.31, 30], [0.9, 0.45, 28], [0.948, 0.525, 30],
+    // 右下荷叶群
+    [0.848, 0.865, 46], [0.928, 0.695, 38], [0.9, 0.935, 42],
+    // 左下大石
+    [0.24, 0.7, 44], [0.3, 0.78, 40], [0.115, 0.895, 46],
+    // 草丛与底缘荷叶
+    [0.06, 0.33, 26], [0.045, 0.6, 30], [0.94, 0.03, 30], [0.55, 0.965, 34], [0.66, 0.93, 30],
+  ];
+  for (const [fx, fy, r] of spots) {
+    const x = fx * c.width;
+    const y = fy * c.height;
+    g.save();
+    g.translate(x, y);
+    g.scale(1, 0.45); // 压扁成盖在物体上缘的雪
+    const grd = g.createRadialGradient(0, 0, 0, 0, 0, r);
+    grd.addColorStop(0, 'rgba(248,252,255,0.9)');
+    grd.addColorStop(0.55, 'rgba(244,249,253,0.5)');
+    grd.addColorStop(1, 'rgba(240,247,252,0)');
+    g.fillStyle = grd;
+    g.beginPath();
+    g.arc(0, 0, r, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+  }
+  return Texture.from(c);
+}
 const bgTexs: Record<string, Texture> = {
   // season id 仍沿用 'v7'（URL ?season=v7 与壳配置的既有取值）；v7=默认荷塘=夏景。
   // 四季图与 v7 是同一构图的换季重绘，直接用原画不洗白——换季交叉溶解时色调才连得上。
   v7: Texture.from(bgDefaultI),
   spring: Texture.from(bgSpringI),
   autumn: Texture.from(bgAutumnI),
-  winter: Texture.from(bgWinterI),
+  winter: makeWinterTex(),
 };
 const bottom = new Sprite(bgTexs[cfg.season] ?? bgTexs.v7);
 const bottomNext = new Sprite(); // 换季溶解：目标季图淡入，结束后落到底图
@@ -202,8 +244,12 @@ document.addEventListener('mouseleave', () => (cursor = null));
 // 涟漪回调：wake 收【归一化屏幕坐标】(0..1)，与 Water.drop 一致（r/s 为可选强度：
 // 鱼尾波小圈，蛙落/蛙鸣/蜻蜓点水大圈）。历史上这里多做了一次 /W、/H，导致鱼吃食、
 // 青蛙落地、蜻蜓点水的涟漪全被画到左上角去了。
-// 静水时所有落水扰动都静音：鱼尾波、投喂、蜻蜓点水都不再起波纹
-const wake = calmWater ? () => {} : (nx: number, ny: number, r = 1.1, s = 0.12) => water.drop(nx, ny, r, s);
+// 静水时所有落水扰动都静音：鱼尾波、投喂、蜻蜓点水都不再起波纹。
+// 冬季湖面结冰同理（waterStill 每帧按季节刷新）。
+let waterStill = calmWater;
+const wake = (nx: number, ny: number, r = 1.1, s = 0.12) => {
+  if (!waterStill) water.drop(nx, ny, r, s);
+};
 
 // —— 投喂：只有点击才撒食（2026-10-02 拍板，悬停自动撒食已撤）——
 function feedAt(x: number, y: number) {
@@ -226,7 +272,7 @@ window.addEventListener('pointerdown', (e) => feedAt(e.clientX, e.clientY));
 let seasonCur: string = cfg.season;
 let seasonNext = '';
 let fadeLeft = 0;
-const SEASON_FADE = 10;
+const SEASON_FADE = 5;
 function setSeason(id: string) {
   if (id === seasonCur || !bgTexs[id]) return;
   seasonNext = id;
@@ -375,6 +421,14 @@ app.ticker.add((tk) => {
   // 悬停撒食已撤（2026-10-02）：只有点击才有食物
 
   water.step(dt);
+  // 冬季结冰：冰面无波——焦散/微波/折射全静，雪落只留融点不化圈
+  const frozen = seasonCur === 'winter';
+  waterStill = calmWater || frozen;
+  caustics.layer.visible = !waterStill;
+  swells.layer.visible = !waterStill;
+  dispBottom.scale.set(waterStill ? 0 : 40);
+  dispSchool.scale.set(waterStill ? 0 : 40);
+  snowfall.calm = waterStill;
   if (!calmWater) stepGlints(dt, W, H); // 静水没有随机微波
   // 夏天=默认荷塘（v7）：蜻蜓在夏景白天 7:00–18:30 造访（?dfly=1 强制预览）；
   // 青蛙在夏景昼夜都出来（夜里鼓腮正是蛙鸣，?frog=1 强制预览）——同一套"夏天"定义
@@ -385,10 +439,10 @@ app.ticker.add((tk) => {
   // 焦散推进：正午最亮、夜里只剩月光级光网（fish-d dayPhase causticMul 1.0↔0.22）
   const wxHour = cfg.hour ?? nowHour();
   const dayness = Math.max(0, Math.min(1, 1 - Math.abs(wxHour - 12) / 9));
-  if (!calmWater) {
-    caustics.update(T, 0.22 + 0.78 * dayness);
-    swells.update(T, 1);
-  }
+    if (!waterStill) {
+      caustics.update(T, 0.22 + 0.78 * dayness);
+      swells.update(T, 1);
+    }
   foodLayer.update(dt, W, H, wake);
   school.update(dt, T, cursor, W, H, foodLayer.foods, wake);
   audit?.();
@@ -474,8 +528,10 @@ app.ticker.add((tk) => {
     }
   }
   // 昼夜：?hour=22 可强制预览
-  dayTint.update(cfg.hour ?? nowHour());
+  // 冬季去黄：雪景吃晨昏暖金色会发黄（2026-10-03 反馈），multiply 色往白回退 75%
+  dayTint.update(cfg.hour ?? nowHour(), seasonCur === 'winter' ? 0.75 : 0);
   fogs.forEach((f, i) => {
+    f.tint = seasonCur === 'winter' ? 0xe8f2fc : 0xffffff; // 纸白雾在雪景里也调成冷色
     f.x = W * (0.5 + 0.28 * Math.sin(T * 0.021 + i * 2.1));
     f.y = H * (0.5 + 0.3 * Math.sin(T * 0.017 + i * 1.7));
   });

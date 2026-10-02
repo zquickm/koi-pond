@@ -23,14 +23,19 @@ function lerpHex(a: number, b: number, k: number): number {
   return (r << 16) | (g << 8) | bl;
 }
 
-export function tintAt(hour: number): number {
+/** 此刻的 multiply 色。soften：往白色回退的比例（雪景吃暖金色会发黄，冬季用它去黄）。 */
+export function tintAt(hour: number, soften = 0): number {
   const h = ((hour % 24) + 24) % 24;
+  let c = 0xffffff;
   for (let i = 0; i < KEYS.length - 1; i++) {
     const [h0, c0] = KEYS[i];
     const [h1, c1] = KEYS[i + 1];
-    if (h >= h0 && h <= h1) return lerpHex(c0, c1, (h - h0) / (h1 - h0 || 1));
+    if (h >= h0 && h <= h1) {
+      c = lerpHex(c0, c1, (h - h0) / (h1 - h0 || 1));
+      break;
+    }
   }
-  return 0xffffff;
+  return soften > 0 ? lerpHex(c, 0xffffff, Math.min(1, soften)) : c;
 }
 
 export function isNight(hour: number): boolean {
@@ -49,8 +54,8 @@ export class DayTint {
   constructor() {
     this.sp.blendMode = 'multiply';
   }
-  update(hour: number) {
-    this.sp.tint = tintAt(hour);
+  update(hour: number, soften = 0) {
+    this.sp.tint = tintAt(hour, soften);
   }
   layout(W: number, H: number) {
     this.sp.width = W;
