@@ -506,12 +506,14 @@ export class Rainfall {
 /** 冬季点击互动：点哪儿哪儿下雪——撒一把雪粒、原地积成堆，连点把小雪人一点一点堆起来。
  *  造型参照插画界通用配方（Xencelabs/Vaessen 教程）：小身子大头、点眼+微笑+胡萝卜鼻、
  *  暖帽+彩围巾；第 3 下冒底球、第 4 下中球、第 5 下头球、第 6 下五官行头淡入，
- *  每个新部件带回弹地"长"出来。冬天鱼在冰下吃不到食，点击从投喂换成玩雪。 */
+ *  每个新部件带回弹地"长"出来。放久了会化：雪堆 30s、雪人 90s 无人打理就开始消融
+ *  （淡去+瘫软，约 3s 化完），化之前再点一下能救回来。冬天鱼在冰下吃不到食，
+ *  点击从投喂换成玩雪。 */
 export class SnowPiles {
   readonly container = new Container();
   private blob: Texture;
   private t = 0;
-  private piles: { x: number; y: number; lvl: number; blob: Sprite; man: Man | null }[] = [];
+  private piles: Pile[] = [];
   private flakes: { sp: Sprite; x: number; y: number; vx: number; vy: number; life: number }[] = [];
 
   constructor() {
@@ -551,15 +553,22 @@ export class SnowPiles {
       const sp = new Sprite(this.blob);
       sp.anchor.set(0.5, 0.78);
       this.container.addChild(sp);
-      p = { x, y, lvl: 0, blob: sp, man: null };
+      p = { x, y, lvl: 0, r: 0, blob: sp, man: null, idle: 0, melt: -1 };
       this.piles.push(p);
     }
     p.lvl++;
+    p.idle = 0; // 有人打理：取消消融、恢复精神
+    p.melt = -1;
     // 雪堆随堆雪长高
     const pileR = [13, 20, 25, 27, 29, 31][Math.min(p.lvl, 6) - 1] ?? 31;
+    p.r = pileR;
     p.blob.position.set(p.x, p.y);
     p.blob.scale.set(pileR / 32, (pileR * 0.6) / 32);
     p.blob.alpha = 0.85;
+    if (p.man) {
+      p.man.root.alpha = 1; // 救回来：撤销消融的淡出与瘫软
+      p.man.root.scale.set(1);
+    }
     // 三球进度：3 下底球、4 下中球、5 下头球、6 下行头（半径=目标尺寸，逐级放大）
     const LVL_BALLS: [number, number, number][] = [
       [0, 0, 0], [0, 0, 0], [15, 0, 0],
@@ -634,6 +643,20 @@ export class SnowPiles {
     });
     for (const p of this.piles) {
       const man = p.man;
+      // 消融：无人打理就慢慢化——雪堆 30s、雪人 90s 起始，约 3s 化完（淡去+瘫软）
+      if (p.melt < 0) {
+        p.idle += dt;
+        if (p.idle > (man ? 90 : 30)) p.melt = 0;
+      }
+      if (p.melt >= 0) {
+        p.melt += dt / 3;
+        const k = Math.min(1, p.melt);
+        p.blob.alpha = 0.85 * (1 - k);
+        p.blob.scale.set((p.r * (1 - 0.15 * k)) / 32, (p.r * 0.6 * (1 - 0.5 * k)) / 32); // 瘫软：越化越矮
+        man && (man.root.alpha = 1 - k);
+        man && man.root.scale.set(1 - 0.2 * k);
+        continue;
+      }
       if (!man) continue;
       // 新球回弹地长到目标尺寸（easeOutBack）
       for (const part of man.parts) {
@@ -647,6 +670,13 @@ export class SnowPiles {
       // 行头淡入
       if (man.dressed) man.deco.alpha = Math.min(1, man.deco.alpha + dt * 2.4);
     }
+    // 化完的收走
+    this.piles = this.piles.filter((p) => {
+      if (p.melt < 1) return true;
+      p.blob.destroy();
+      p.man?.root.destroy({ children: true });
+      return false;
+    });
   }
 
   /** 离开冬季/窗口重排时清场（雪堆雪人都是屏幕坐标） */
@@ -660,6 +690,17 @@ export class SnowPiles {
     this.flakes = [];
   }
 }
+
+type Pile = {
+  x: number;
+  y: number;
+  lvl: number;
+  r: number; // 当前雪堆半径（消融瘫软用）
+  blob: Sprite;
+  man: Man | null;
+  idle: number; // 距上次打理的秒数
+  melt: number; // -1=没在化；≥0 为消融进度 0..1
+};
 
 type Man = {
   root: Container;
