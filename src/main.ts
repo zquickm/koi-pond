@@ -166,6 +166,10 @@ const snowfall = new Snowfall();
 snowfall.calm = calmWater; // 静水上不化成一圈圈波纹，只留一个小融点
 // 季节降雨（春季氛围场）
 const rainfall = new Rainfall();
+// 夏季大雨的闪电：全屏白幕抖闪一下（亮-暗-更亮-指数衰减）
+const lightning = new Sprite(Texture.WHITE);
+lightning.tint = 0xf5f8ff;
+lightning.alpha = 0;
 app.stage.addChild(
   bottom,
   water.waveMap,
@@ -182,6 +186,7 @@ app.stage.addChild(
   snowfall.container,
   rainfall.container,
   fireflies.container,
+  lightning,
 );
 
 // 光标：浏览器与独立壳走 pointer 事件；macOS 钉桌面壳 D5 改 CGEvent 轮询注入，接口不变
@@ -243,7 +248,11 @@ let glintT = 0.8;
 let seasonT = 8 + Math.random() * 12;
 let seasonLeft = 0;
 let seasonElapsed = 0;
-let rainPeak = 1; // 本场雨的强度峰值：小雨 0.4 / 大雨 1（春天固定大雨档，夏天每场随机）
+let rainPeak = 1; // 本场雨的强度峰值：小雨 0.4 / 大雨 1（春天固定小雨档，夏天每场随机）
+// 大雨偶发闪电：本场 1-2 道，首道在开场 3-17s，道间至少隔 10s
+let boltLeft = 0;
+let boltT = 0;
+let flashT = -1; // ≥0 = 正在抖闪，值为一瞬起的秒数
 function stepGlints(dt: number, W: number, H: number) {
   glintT -= dt;
   if (glintT > 0) return;
@@ -310,7 +319,8 @@ const audit = (() => {
         `audit frames=${frames} fish=${school.poses.length} minCenter=${minC.toFixed(1)} minBody=${minB.toFixed(1)}` +
         ` onLand=${onLand} breaches=${breaches} bucket=${bucket.join('/')}` +
         ` | frog spots=${frogSpots} hops=${frogHops} hopDist=${frogMinHop === Infinity ? '-' : frogMinHop.toFixed(0)}~${frogMaxHop.toFixed(0)} notOnLand=${frogBad}` +
-        ` rain=${rainfall.dropCount}`;
+        ` rain=${rainfall.dropCount}` +
+        ` flash=${flashT >= 0 ? flashT.toFixed(2) : "-"}`;
     }
   };
 })();
@@ -361,10 +371,20 @@ app.ticker.add((tk) => {
       seasonT = 50 + Math.random() * 130;
       // 春天=小雨（2026-10-03 拍板）；夏天小雨·大雨各半
       rainPeak = cfg.season === 'v7' ? (Math.random() < 0.5 ? 0.4 : 1) : 0.4;
+      // 只有大雨场配闪电
+      boltLeft = cfg.season === 'v7' && rainPeak === 1 ? 1 + ((Math.random() < 0.5 ? 1 : 0)) : 0;
+      boltT = 3 + Math.random() * 14;
     }
   }
   if (forceRain || forceSnow) seasonLeft = Math.max(seasonLeft, 60);
-  if (forceRain) rainPeak = rainParam === 'light' ? 0.4 : 1;
+  if (forceRain) {
+    rainPeak = rainParam === 'light' ? 0.4 : 1;
+    // 预览大雨也配闪电：用完隔一阵再补，方便守着看
+    if (rainPeak === 1 && boltLeft === 0 && boltT <= 0) {
+      boltLeft = 1 + (Math.random() < 0.5 ? 1 : 0);
+      boltT = 3 + Math.random() * 10;
+    }
+  }
   if (seasonLeft > 0) {
     seasonLeft -= dt;
     seasonElapsed += dt;
@@ -378,6 +398,15 @@ app.ticker.add((tk) => {
           water.drop(nx, ny, 0.8 + Math.random() * 0.8, 0.08 + Math.random() * 0.08);
         }
       });
+      // 大雨正下着才放闪电（boltT 一直倒数，用完由 forceRain 分支补货）
+      if (flashT < 0 && rainPeak > 0.9) {
+        boltT -= dt;
+        if (boltT <= 0 && boltLeft > 0) {
+          flashT = 0;
+          boltLeft--;
+          boltT = 10 + Math.random() * 15; // 道间间隔
+        }
+      }
     } else {
       // 降雪：雪粒飘到水面化成融痕（融痕画在 Snowfall 里，这里只判断落点是不是水，
       // 并让其中一部分落点变成真实的涟漪）
@@ -394,6 +423,16 @@ app.ticker.add((tk) => {
   // 不压的话白点在深蓝夜色里比白天还跳（2026-10-02 反馈：晚上的雪太白了）。
   // 用底图当前乘色算深浅，而不是用萤火虫的 nightK——那个 19:12 就满了，那会儿天还暖着。
   snowfall.container.alpha = 1 - 0.85 * darknessAt(nfHour);
+  // 闪电抖闪包络：亮-暗-更亮-指数衰减，约 1.3s（全场雨 1-2 道）
+  if (flashT >= 0) {
+    flashT += dt;
+    const s = flashT;
+    lightning.alpha = s < 0.08 ? 0.5 : s < 0.16 ? 0.1 : s < 0.3 ? 0.62 : Math.max(0, 0.62 * Math.exp(-(s - 0.3) * 5));
+    if (s > 1.3) {
+      flashT = -1;
+      lightning.alpha = 0;
+    }
+  }
   // 昼夜：?hour=22 可强制预览
   dayTint.update(cfg.hour ?? nowHour());
   fogs.forEach((f, i) => {
