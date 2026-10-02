@@ -21,7 +21,6 @@ import bgWinterUrl from './assets/bg-winter.png';
 import frogUrl from './assets/frog.jpg';
 import tadUrl from './assets/tadpoles.jpg';
 import dflyUrl from './assets/dragonfly.jpg';
-import iceUrl from './assets/bg-winter-ice.png';
 
 const cfg = loadConfig();
 // ?rain / ?rain=light|heavy / ?snow / ?calm 预览开关（可跨季节）
@@ -56,19 +55,19 @@ const loadImg = (url: string) =>
     im.onerror = rej;
     im.src = url;
   });
-const [bgDefaultI, bgSpringI, bgAutumnI, bgWinterI, iceI] = await Promise.all(
-  [bgDefaultUrl, bgSpringUrl, bgAutumnUrl, bgWinterUrl, iceUrl].map(loadImg),
+const [bgDefaultI, bgSpringI, bgAutumnI, bgWinterI] = await Promise.all(
+  [bgDefaultUrl, bgSpringUrl, bgAutumnUrl, bgWinterUrl].map(loadImg),
 );
 
-/** 冬季底图一次性烘焙：冬画 + 冰面叠加（预烘焙图，湖面反光/霜花/冰排，岸边自带软边）
- *  + 荷叶/石头/草丛上缘的积雪。都画进同一张贴图，换季溶解时天然同步。 */
+/** 冬季底图一次性烘焙：冬画（本身已画好冰湖雪景）+ 荷叶/石头/草丛上缘的积雪盖。
+ *  旧版那张预烘焙冰板（bg-winter-ice）是给深色水面的旧冬画用的，满屏白板会盖掉
+ *  新冬画的冰湖水色（2026-10-03"偏黄/跟原图不一样"的元凶），不再使用。 */
 function makeWinterTex(): Texture {
   const c = document.createElement('canvas');
   c.width = bgWinterI.width;
   c.height = bgWinterI.height;
   const g = c.getContext('2d')!;
   g.drawImage(bgWinterI, 0, 0);
-  g.drawImage(iceI, 0, 0, c.width, c.height);
   // 积雪盖：软白椭圆压在荷叶/石头/草丛的上缘（比例坐标取自 PERCH_SEEDS 一带的落点）
   const spots: [number, number, number][] = [
     // 左上莲叶群
