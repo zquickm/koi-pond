@@ -503,13 +503,15 @@ export class Rainfall {
   }
 }
 
-/** 冬季点击互动：点哪儿哪儿下雪——撒一把雪粒、原地积成堆，同一处连点 5 下长出小雪人。
- *  冬天鱼在冰下吃不到食，点击从投喂换成玩雪（2026-10-03 用户点子）。 */
+/** 冬季点击互动：点哪儿哪儿下雪——撒一把雪粒、原地积成堆，连点把小雪人一点一点堆起来。
+ *  造型参照插画界通用配方（Xencelabs/Vaessen 教程）：小身子大头、点眼+微笑+胡萝卜鼻、
+ *  暖帽+彩围巾；第 3 下冒底球、第 4 下中球、第 5 下头球、第 6 下五官行头淡入，
+ *  每个新部件带回弹地"长"出来。冬天鱼在冰下吃不到食，点击从投喂换成玩雪。 */
 export class SnowPiles {
   readonly container = new Container();
   private blob: Texture;
-  private piles: { x: number; y: number; lvl: number; blob: Sprite }[] = [];
-  private men: Container[] = [];
+  private t = 0;
+  private piles: { x: number; y: number; lvl: number; blob: Sprite; man: Man | null }[] = [];
   private flakes: { sp: Sprite; x: number; y: number; vx: number; vy: number; life: number }[] = [];
 
   constructor() {
@@ -525,7 +527,7 @@ export class SnowPiles {
     this.blob = Texture.from(c);
   }
 
-  /** 点了一下：撒一把雪 + 并入附近的堆加高；第 5 下堆出小雪人 */
+  /** 点了一下：撒一把雪 + 并入附近的堆；3 下起按进度长雪人 */
   click(x: number, y: number) {
     for (let i = 0; i < 9; i++) {
       const sp = new Sprite(this.blob);
@@ -549,42 +551,74 @@ export class SnowPiles {
       const sp = new Sprite(this.blob);
       sp.anchor.set(0.5, 0.78);
       this.container.addChild(sp);
-      p = { x, y, lvl: 0, blob: sp };
+      p = { x, y, lvl: 0, blob: sp, man: null };
       this.piles.push(p);
     }
     p.lvl++;
+    // 雪堆随堆雪长高
+    const pileR = [13, 20, 25, 27, 29, 31][Math.min(p.lvl, 6) - 1] ?? 31;
     p.blob.position.set(p.x, p.y);
-    const r = 10 + p.lvl * 4.5;
-    p.blob.scale.set(r / 32, (r * 0.62) / 32);
+    p.blob.scale.set(pileR / 32, (pileR * 0.6) / 32);
     p.blob.alpha = 0.85;
-    if (p.lvl === 5) this.buildMan(p);
+    // 三球进度：3 下底球、4 下中球、5 下头球、6 下行头（半径=目标尺寸，逐级放大）
+    const LVL_BALLS: [number, number, number][] = [
+      [0, 0, 0], [0, 0, 0], [15, 0, 0],
+      [21, 11, 0], [22, 14, 8.5], [22, 15, 11.5],
+    ];
+    const balls = LVL_BALLS[Math.min(p.lvl, 6) - 1];
+    if (balls.some((r) => r > 0)) {
+      if (!p.man) {
+        const root = new Container();
+        root.position.set(p.x, p.y + 4);
+        const deco = new Graphics();
+        deco.alpha = 0;
+        root.addChild(deco);
+        this.container.addChild(root);
+        p.man = { root, deco, parts: [], dressed: false };
+      }
+      const POS: [number, number][] = [[0, -16], [0, -44], [0, -66]];
+      balls.forEach((r, i) => {
+        if (r <= 0) return;
+        const part = p.man!.parts[i];
+        if (part) {
+          part.target = r;
+        } else {
+          const sp = new Sprite(this.blob);
+          sp.anchor.set(0.5);
+          sp.position.set(POS[i][0], POS[i][1]);
+          sp.scale.set(0.01);
+          p.man!.root.addChildAt(sp, i);
+          p.man!.parts[i] = { sp, target: r, born: this.t };
+        }
+      });
+      if (p.lvl >= 6) this.dressMan(p.man!);
+    }
   }
 
-  /** 三球小雪人：软白球叠罗汉 + 墨点眼扣 + 枯枝臂 + 一点朱砂围巾 */
-  private buildMan(p: { x: number; y: number }) {
-    const man = new Container();
-    const mk = (r: number, x: number, y: number) => {
-      const s = new Sprite(this.blob);
-      s.anchor.set(0.5);
-      s.position.set(x, y);
-      s.scale.set(r / 32);
-      man.addChild(s);
-    };
-    mk(24, 0, -18);
-    mk(16, 0, -44);
-    mk(10.5, 0, -63);
-    const g = new Graphics();
-    g.circle(-3.4, -65, 1.5).circle(3.4, -65, 1.5).fill({ color: 0x37474f }); // 眼
-    g.circle(0, -47, 1.4).circle(0, -41, 1.4).fill({ color: 0x37474f }); // 扣子
-    g.moveTo(-13, -46).lineTo(-26, -56).moveTo(13, -46).lineTo(26, -56).stroke({ color: 0x5d4a3a, width: 1.4 }); // 枯枝臂
-    g.arc(0, -54.5, 4.6, Math.PI * 0.15, Math.PI * 0.85).stroke({ color: 0xb0524a, width: 2.2 }); // 朱砂围巾
-    man.addChild(g);
-    man.position.set(p.x, p.y + 4);
-    this.container.addChild(man);
-    this.men.push(man);
+  /** 行头：眼鼻微笑+腮红、扣子、枯枝臂、围巾、绒球暖帽（一次画好，淡入） */
+  private dressMan(man: Man) {
+    if (man.dressed) return;
+    man.dressed = true;
+    const g = man.deco;
+    g.circle(-4, -68.5, 1.7).circle(4, -68.5, 1.7).fill({ color: 0x37474f }); // 眼
+    g.moveTo(-1.8, -65.6).lineTo(1.8, -65.6).lineTo(0.8, -62.4).closePath().fill({ color: 0xc9924b }); // 胡萝卜鼻
+    g.arc(0, -63.2, 3, Math.PI * 0.12, Math.PI * 0.88).stroke({ color: 0x37474f, width: 1.1 }); // 微笑
+    g.circle(-6.6, -63.6, 1.6).circle(6.6, -63.6, 1.6).fill({ color: 0xb0524a, alpha: 0.25 }); // 腮红
+    g.circle(0, -46, 1.4).circle(0, -40.5, 1.4).fill({ color: 0x37474f }); // 扣子
+    // 枯枝臂（带小杈）
+    g.moveTo(-13, -45).lineTo(-27, -57).moveTo(-21, -52.5).lineTo(-25, -49).moveTo(13, -45).lineTo(27, -57).moveTo(21, -52.5).lineTo(25, -49)
+      .stroke({ color: 0x5d4a3a, width: 1.3 });
+    // 朱砂围巾 + 垂下的一角
+    g.arc(0, -56, 5.4, Math.PI * 0.1, Math.PI * 0.9).stroke({ color: 0xb0524a, width: 2.4 });
+    g.moveTo(3.4, -52).lineTo(5.4, -45.5).stroke({ color: 0xb0524a, width: 2.2 });
+    // 玄青绒球暖帽
+    g.moveTo(-7.8, -73.5).arc(0, -73.5, 7.8, Math.PI, Math.PI * 2).closePath().fill({ color: 0x44586a });
+    g.roundRect(-8.8, -74.8, 17.6, 2.5, 1.2).fill({ color: 0x3c4f60 });
+    g.circle(0, -81.6, 2.3).fill({ color: 0xf2f6fa }); // 绒球
   }
 
   update(dt: number) {
+    this.t += dt;
     for (const f of this.flakes) {
       f.life -= dt;
       f.x += f.vx * dt;
@@ -598,16 +632,41 @@ export class SnowPiles {
       f.sp.destroy();
       return false;
     });
+    for (const p of this.piles) {
+      const man = p.man;
+      if (!man) continue;
+      // 新球回弹地长到目标尺寸（easeOutBack）
+      for (const part of man.parts) {
+        if (!part) continue;
+        const k = Math.min(1, (this.t - part.born) / 0.5);
+        const c1 = 1.70158;
+        const eob = 1 + (c1 + 1) * (k - 1) ** 3 + c1 * (k - 1) ** 2;
+        const f = 0.55 + 0.45 * eob;
+        part.sp.scale.set(Math.max(0.01, (part.target * f) / 32));
+      }
+      // 行头淡入
+      if (man.dressed) man.deco.alpha = Math.min(1, man.deco.alpha + dt * 2.4);
+    }
   }
 
   /** 离开冬季/窗口重排时清场（雪堆雪人都是屏幕坐标） */
   clear() {
-    for (const p of this.piles) p.blob.destroy();
-    for (const m of this.men) m.destroy();
+    for (const p of this.piles) {
+      p.blob.destroy();
+      p.man?.root.destroy({ children: true });
+    }
     this.piles = [];
-    this.men = [];
+    for (const f of this.flakes) f.sp.destroy();
+    this.flakes = [];
   }
 }
+
+type Man = {
+  root: Container;
+  deco: Graphics;
+  parts: { sp: Sprite; target: number; born: number }[]; // [底球, 中球, 头球]
+  dressed: boolean;
+};
 
 export class Critters {
   readonly water = new Container(); // 蝌蚪（鱼层之下）
