@@ -359,9 +359,12 @@ app.ticker.add((tk) => {
         }
       });
     } else {
-      // 降雪：雪粒缓飘，落水偶有融痕
+      // 降雪：雪粒飘到水面化成融痕（融痕画在 Snowfall 里，这里只判断落点是不是水，
+      // 并让其中一部分落点变成真实的涟漪）
       snowfall.update(dt, T, env, (nx, ny) => {
-        if (pond.probe(nx * W, ny * H).d > 12) water.drop(nx, ny, 1 + Math.random(), 0.08);
+        const wet = pond.probe(nx * W, ny * H).d > 12;
+        if (wet && Math.random() < 0.3) water.drop(nx, ny, 1 + Math.random(), 0.08);
+        return wet;
       });
     }
   } else if (cfg.season === 'winter' || forceSnow) {
