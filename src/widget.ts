@@ -2,11 +2,11 @@
 // 可读性方案参照 fish-d 的时钟（浅色字+深影+错版衬影，昼夜一套通吃）：
 // 宣纸米白字 + 淡墨柔影 + 淡青错版衬影（版画压印感），水墨风。
 //
-// 冬季额外加一层"雪"（只在这个小组件上，不动全屏那套雪）：
-//   · 字顶积雪：用向上的白色 text-shadow 叠两层——阴影是字形的副本，抬几像素就正好
-//     在每一笔的顶上留一道白，跟着字形走，不用去抠字形轮廓（Typekit 贺卡那类做法）。
-//   · 冰壳：-webkit-text-stroke 描一圈半透明白，字像蒙了层薄冰。
-//   · 局部飘雪：小组件自己的一块 canvas，雪花只落在这一小块里，边上淡出，不会看出矩形边界。
+// 冬季给这块加"雪"，两种错法都试过、都改掉了：
+//   · 向上的白色 text-shadow 冒充积雪 —— 阴影是字形的副本，整块字都重影；
+//   · 把字自己画进 canvas 再重画 —— 错版衬影得自己复刻，结果字外面糊了一圈深色。
+//   现在的做法：DOM 文字原样保留（CSS 那套衬影一个字不动），离屏 canvas **只用来量**每一列的
+//   笔画顶边，然后把雪**盖**在笔画顶上——雪是另外涂上去的一层，不会复制字形，所以不重影。
 import { Solar } from 'lunar-javascript';
 
 const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -20,8 +20,15 @@ export class ClockWidget {
   private lunar: HTMLDivElement;
   private cv: HTMLCanvasElement | null = null;
   private cx: CanvasRenderingContext2D | null = null;
+  private textCv: HTMLCanvasElement | null = null; // 离屏：只有字形（用来取积雪的顶边）
+  private topY = new Int32Array(0); // 每一列笔画顶边（-1 = 这列没字）
+  private capDepth = new Float32Array(0); // 每一列积雪厚度
+  private snowy = false;
+  private lastText = '';
   private flakes: Flake[] = [];
   private pad = 34;
+  private cw = 0;
+  private ch = 0;
   private t = 0;
   private last = 0;
 
@@ -40,29 +47,6 @@ export class ClockWidget {
       .koi-time { font-size: clamp(34px, 6.4vmin, 72px); font-weight: 600; letter-spacing: 5px; line-height: 1; }
       .koi-date { font-size: clamp(13px, 2.2vmin, 19px); margin-top: .35em; letter-spacing: 3px; opacity: .92; }
       .koi-lunar { font-size: clamp(13px, 2.2vmin, 19px); margin-top: .15em; letter-spacing: 3px; opacity: .8; }
-      /* 冬季：字顶积一层雪 + 一圈薄冰壳。
-         text-shadow 画在字形**背后**，所以向上偏移的白影只在笔画顶上露出一道——正好是积雪。
-         淡底上纯白会糊掉，所以在白影后面垫一层冷蓝影，把雪托出来。 */
-      .koi-widget.koi-snowy { color: rgba(240,247,252,.97); -webkit-text-stroke: 1px rgba(255,255,255,.3); }
-      .koi-widget.koi-snowy .koi-time {
-        text-shadow:
-          0 -5px 0 rgba(255,255,255,.98),
-          0 -8px 3px rgba(255,255,255,.55),
-          0 -3px 4px rgba(96,132,168,.5),
-          1.5px 2.5px 0 rgba(126,196,184,.28),
-          2px 5px 14px rgba(10,36,32,.5),
-          -1px -1px 2px rgba(10,36,32,.35);
-      }
-      .koi-widget.koi-snowy .koi-date,
-      .koi-widget.koi-snowy .koi-lunar {
-        text-shadow:
-          0 -2px 0 rgba(255,255,255,.95),
-          0 -3.5px 1.5px rgba(255,255,255,.5),
-          0 -1.5px 2.5px rgba(96,132,168,.5),
-          1.5px 2.5px 0 rgba(126,196,184,.28),
-          2px 5px 14px rgba(10,36,32,.5),
-          -1px -1px 2px rgba(10,36,32,.35);
-      }
       .koi-snowcv { position: absolute; pointer-events: none; }
     `;
     document.head.appendChild(style);
@@ -99,7 +83,7 @@ export class ClockWidget {
     } catch {
       this.lunar.textContent = '';
     }
-    this.fitSnow();
+    if (this.snowy) this.fitSnow();
   }
 
   start(hourOverride?: number | null, snowy = false) {
@@ -108,17 +92,19 @@ export class ClockWidget {
     if (snowy) this.enableSnow();
   }
 
-  // —— 冬季局部飘雪：只铺在小组件这一小块上，边上淡出 ——
+  // —— 冬季：canvas 重画这三行字 + 字顶积雪 + 局部飘雪 ——
 
   private enableSnow() {
+    this.snowy = true;
     this.el.classList.add('koi-snowy');
     const cv = document.createElement('canvas');
     cv.className = 'koi-snowcv';
     this.el.appendChild(cv);
     this.cv = cv;
     this.cx = cv.getContext('2d');
+    this.textCv = document.createElement('canvas');
     this.fitSnow();
-    window.addEventListener('resize', () => this.fitSnow());
+    this.drawSnow(0);
     const step = (now: number) => {
       const dt = Math.min((now - (this.last || now)) / 1000, 0.05);
       this.last = now;
@@ -129,7 +115,7 @@ export class ClockWidget {
     requestAnimationFrame(step);
   }
 
-  /** canvas 跟着文字块大小走（文字每秒更新，字号/行数都可能变） */
+  /** canvas 跟着文字块大小走；尺寸变了就重画字形层 */
   private fitSnow() {
     const cv = this.cv;
     if (!cv) return;
@@ -137,27 +123,98 @@ export class ClockWidget {
     const w = Math.max(1, Math.round(r.width + this.pad * 2));
     const h = Math.max(1, Math.round(r.height + this.pad * 2));
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (cv.width !== w * dpr || cv.height !== h * dpr) {
-      cv.width = w * dpr;
-      cv.height = h * dpr;
+    const changed = this.cw !== w || this.ch !== h || cv.width !== w * dpr;
+    if (changed) {
+      this.cw = w;
+      this.ch = h;
+      for (const c of [cv, this.textCv!]) {
+        c.width = Math.round(w * dpr);
+        c.height = Math.round(h * dpr);
+      }
       cv.style.width = `${w}px`;
       cv.style.height = `${h}px`;
       cv.style.left = `${-this.pad}px`;
       cv.style.top = `${-this.pad}px`;
+      const tx = this.textCv!.getContext('2d')!;
+      tx.setTransform(dpr, 0, 0, dpr, 0, 0);
       this.cx?.setTransform(dpr, 0, 0, dpr, 0, 0);
-      this.flakes = [];
+      this.lastText = '';
+      if (!this.flakes.length) {
+        for (let i = 0; i < 34; i++) {
+          this.flakes.push({
+            x: Math.random() * w,
+            y: Math.random() * h,
+            r: 1.3 + Math.random() * 1.8,
+            vy: 7 + Math.random() * 13,
+            ph: Math.random() * Math.PI * 2,
+            sw: 2 + Math.random() * 5,
+            a: 0.45 + Math.random() * 0.5,
+          });
+        }
+      }
     }
-    const want = 34;
-    while (this.flakes.length < want) {
-      this.flakes.push({
-        x: Math.random() * w,
-        y: Math.random() * h,
-        r: 1.3 + Math.random() * 1.8,
-        vy: 7 + Math.random() * 13,
-        ph: Math.random() * Math.PI * 2,
-        sw: 2 + Math.random() * 5,
-        a: 0.45 + Math.random() * 0.5,
-      });
+    const text = `${this.time.textContent}|${this.date.textContent}|${this.lunar.textContent}`;
+    if (text !== this.lastText) {
+      this.lastText = text;
+      this.renderText();
+    }
+  }
+
+  /** 把三行字按 DOM 的位置/字体画进离屏 canvas（连错版衬影一起），再取积雪用的顶边 */
+  private renderText() {
+    const tx = this.textCv?.getContext('2d');
+    if (!tx || !this.cw) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = this.cw;
+    const H = this.ch;
+    tx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    tx.clearRect(0, 0, W, H);
+    const box = this.el.getBoundingClientRect();
+    // widget 的右边缘在 canvas 坐标里的位置：文字本来就是右对齐的
+    const right = W - this.pad;
+    const lines: [HTMLDivElement, number][] = [
+      [this.time, 1],
+      [this.date, 0.92],
+      [this.lunar, 0.8],
+    ];
+    for (const [el] of lines) {
+      const t = el.textContent ?? '';
+      if (!t) continue;
+      const cs = getComputedStyle(el);
+      const fs = parseFloat(cs.fontSize);
+      tx.font = `${cs.fontWeight} ${fs}px ${cs.fontFamily}`;
+      type Spaced = CanvasRenderingContext2D & { letterSpacing?: string };
+      (tx as Spaced).letterSpacing = cs.letterSpacing === 'normal' ? '0px' : cs.letterSpacing;
+      tx.textAlign = 'right';
+      tx.textBaseline = 'alphabetic';
+      const m = tx.measureText(t);
+      const asc = m.fontBoundingBoxAscent || fs * 0.8;
+      const desc = m.fontBoundingBoxDescent || fs * 0.2;
+      const r = el.getBoundingClientRect();
+      const baseY = r.top - box.top + this.pad + (r.height - (asc + desc)) / 2 + asc;
+      // 只画剪影：这一层永远不显示，只用来量笔画顶边
+      tx.fillStyle = '#000';
+      tx.fillText(t, right, baseY);
+    }
+    // 每列笔画顶边 → 积雪厚度（波浪状，别是一条直线）
+    const img = tx.getImageData(0, 0, this.textCv!.width, this.textCv!.height).data;
+    const pw = this.textCv!.width;
+    const ph = this.textCv!.height;
+    this.topY = new Int32Array(W).fill(-1);
+    this.capDepth = new Float32Array(W);
+    for (let x = 0; x < W; x++) {
+      const px = Math.min(pw - 1, Math.round(x * dpr));
+      for (let y = 0; y < ph; y++) {
+        if (img[(y * pw + px) * 4 + 3] > 40) {
+          this.topY[x] = y / dpr;
+          break;
+        }
+      }
+    }
+    // 厚度用两段正弦叠出来（比随机数顺，也不会随时间抖）
+    for (let x = 0; x < W; x++) {
+      const w1 = Math.sin(x * 0.045) * 0.5 + Math.sin(x * 0.13 + 1.7) * 0.5;
+      this.capDepth[x] = 2.2 + w1 * 1.1 + 1.4;
     }
   }
 
@@ -165,11 +222,32 @@ export class ClockWidget {
     const cx = this.cx;
     const cv = this.cv;
     if (!cx || !cv) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = cv.width / dpr;
-    const h = cv.height / dpr;
+    const w = this.cw;
+    const h = this.ch;
     cx.clearRect(0, 0, w, h);
-    // 淡底上白点会糊掉：给每颗雪一点冷色投影，雪粒才立得住
+    if (this.snowy && this.lastText === '') this.fitSnow();
+    // 字顶积雪：盖在笔画顶上（DOM 文字本身照旧由 CSS 渲染，这里只叠雪）
+    if (this.topY.length === w) {
+      const cap = new Path2D();
+      for (let x = 0; x < w; x++) {
+        const t = this.topY[x];
+        if (t < 0) continue;
+        cap.rect(x, t - 0.6, 1.2, this.capDepth[x]);
+      }
+      cx.save();
+      // 雪自己的冷影：淡底上纯白会糊掉，垫一层才有厚度
+      cx.translate(0, 1.4);
+      cx.fillStyle = 'rgba(104,136,172,.42)';
+      cx.fill(cap);
+      cx.restore();
+      cx.save();
+      cx.filter = 'blur(0.7px)';
+      cx.fillStyle = 'rgba(255,255,255,.97)';
+      cx.fill(cap);
+      cx.restore();
+    }
+    // 飘雪：只在这一小块里，边上淡出
+    cx.save();
     cx.shadowColor = 'rgba(104,136,172,.55)';
     cx.shadowBlur = 3;
     cx.shadowOffsetY = 1;
@@ -180,7 +258,6 @@ export class ClockWidget {
         f.y = -4;
         f.x = Math.random() * w;
       }
-      // 边上淡出：看不出 canvas 的矩形
       const edge = Math.min(f.x, w - f.x, f.y, h - f.y);
       const k = Math.max(0, Math.min(1, edge / (this.pad * 0.75)));
       cx.beginPath();
@@ -188,5 +265,6 @@ export class ClockWidget {
       cx.fillStyle = `rgba(255,255,255,${(f.a * k).toFixed(3)})`;
       cx.fill();
     }
+    cx.restore();
   }
 }
