@@ -24,6 +24,7 @@ export class ClockWidget {
   private topY = new Int32Array(0); // 每一列笔画顶边（-1 = 这列没字）
   private pile = new Float32Array(0); // 每一列积了多厚的雪（从 0 开始长）
   private holdMax = new Float32Array(0); // 每一列最多挂得住多厚（小字挂得少，不然字被埋掉）
+  private cool = new Float32Array(0); // 刚塌过的列：冷却期内不再塌，掉落才有间隔
   private slumps: { x: number; y: number; r: number; vy: number; vx: number; a: number }[] = [];
   private snowy = false;
   private lastText = '';
@@ -226,6 +227,7 @@ export class ClockWidget {
     }
     // 换字（每分钟）＝ 重新开始积：从 0 长起
     this.pile = new Float32Array(W);
+    this.cool = new Float32Array(W);
     this.slumps = [];
   }
 
@@ -294,6 +296,7 @@ export class ClockWidget {
     if (n !== w) return;
     // 1) 长雪：速率跟着"挂得住多厚"走，大小两行差不多同时积满
     for (let x = 0; x < w; x++) {
+      if (this.cool[x] > 0) this.cool[x] -= dt;
       if (this.topY[x] < 0) {
         this.pile[x] = 0;
         continue;
@@ -311,28 +314,38 @@ export class ClockWidget {
       const avg = nb.reduce((a, b) => a + b, 0) / nb.length;
       this.pile[x] += (avg - src[x]) * 0.32 * k;
     }
-    // 3) 挂不住了：滑落一块（每帧最多几处，免得整排一起掉）
-    let shed = 0;
-    for (let x = 0; x < w && shed < 3; x++) {
-      if (this.topY[x] < 0) continue;
+    // 3) 挂不住了：整"堆"一起滑下来（一次掀掉一大片，掉落才有间隔，不会一直滴滴答答）
+    for (let x = 0; x < w; x++) {
+      if (this.topY[x] < 0 || this.cool[x] > 0) continue;
       const hold = this.holdMax[x] * (0.86 + 0.28 * ((Math.sin(x * 0.07 + 0.8) + 1) * 0.5));
       if (this.pile[x] <= hold) continue;
-      shed++;
-      const thick = this.pile[x];
-      this.slumps.push({
-        x: x + 0.5,
-        y: this.topY[x] + thick,
-        r: 1.8 + thick * 0.42,
-        vy: 4 + thick * 1.2,
-        vx: (Math.random() - 0.5) * 8,
-        a: 0.95,
-      });
-      // 带走自己大半，顺手把两边也拽薄一点（像真的滑塌）
-      this.pile[x] *= 0.16;
-      for (const i of [-2, -1, 1, 2]) {
-        const j = x + i;
-        if (j > 0 && j < w && this.topY[j] >= 0) this.pile[j] *= 0.78;
+      // 这一堆的范围：往两边扩到雪明显变薄为止（一次最多 29 列）
+      let lo = x;
+      let hi = x;
+      const th = this.holdMax[x] * 0.45;
+      while (lo > Math.max(0, x - 14) && this.topY[lo - 1] >= 0 && this.pile[lo - 1] > th) lo--;
+      while (hi < Math.min(w - 1, x + 14) && this.topY[hi + 1] >= 0 && this.pile[hi + 1] > th) hi++;
+      const yTop = this.topY[x] + this.pile[x];
+      let removed = 0;
+      for (let j = lo; j <= hi; j++) {
+        removed += this.pile[j] * 0.85;
+        this.pile[j] *= 0.15; // 只留一点点，重新积起来才有"从 0 开始"的感觉
+        this.cool[j] = 6 + Math.random() * 4;
       }
+      // 掀下来的雪：按体积分成几块往下掉
+      const chunks = Math.max(1, Math.min(3, Math.round((hi - lo + 1) / 12)));
+      for (let c = 0; c < chunks; c++) {
+        const cxp = lo + ((hi - lo) * (c + 0.5)) / chunks;
+        this.slumps.push({
+          x: cxp,
+          y: this.topY[Math.round(cxp)] + this.pile[Math.round(cxp)] * 0.5 + 1,
+          r: Math.max(2.4, Math.min(11, 2 + Math.sqrt(removed / chunks) * 1.1)),
+          vy: 6 + Math.random() * 5,
+          vx: (Math.random() - 0.5) * 10,
+          a: 0.95,
+        });
+      }
+      break; // 一帧只塌一处，掉落是一个一个来的
     }
   }
 
