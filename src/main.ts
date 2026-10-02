@@ -242,122 +242,67 @@ function bakeWinterArt(): { base: Texture; ice: Texture } {
   return { base: Texture.from(c), ice: Texture.from(iceC) };
 }
 const winterBaked = bakeWinterArt();
-/** 春图校色（2026-10-03 多轮定稿）：分空间处理——
- *  水面（标定水岸多边形内）：绿区压缩映射进 184-208° 青蓝带（水色锚定夏水 190°）、
- *  蓝紫去紫、青蓝增彩、S 曲线加对比；
- *  岸上（荷叶/草丛/石头）：保持绿色，只轻降饱和 15%（用户: 荷叶草还是要绿色的）。
- *  掩码 1/4 分辨率 + 一轮盒式平滑，岸边过渡柔和。 */
-function softenGreen(im: HTMLImageElement, waterPoly: readonly (readonly [number, number])[]): HTMLCanvasElement {
+/** 春图校色（2026-10-03 多轮后定稿，用户对比后拍板"还是全图统一蓝调的 f7166fd 好"）：
+ *  全图统一处理——绿区(55-175°)压缩映射锚进 184-208° 青蓝带（水色锚定夏水 190°）、
+ *  蓝紫去紫、青蓝增彩、S 曲线加对比、低彩暗部压黑。
+ *  曾试过分空间（水面蓝/岸上保绿+软掩码），对比后统一蓝调整体更好看，已回退。 */
+function softenGreen(im: HTMLImageElement): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = im.width;
   c.height = im.height;
   const g = c.getContext('2d')!;
   g.drawImage(im, 0, 0);
-  const W = c.width;
-  const H = c.height;
-  // 水面掩码：1/8 分辨率逐格判定 + 三轮盒式平滑——软化成 30-60px 的缓坡过渡，
-  // 水陆交界不再有可辨认的色带。多边形先向质心收缩 8%（腐蚀）：春图的叶子和
-  // v8 标定边界不完全重合，边界一圈保守按"岸"处理保持绿色。
-  const poly = waterPoly.map(([fx, fy]) => [fx * W, fy * H] as const);
-  const cx = poly.reduce((a, [x]) => a + x, 0) / poly.length;
-  const cy = poly.reduce((a, [, y]) => a + y, 0) / poly.length;
-  const eroded = poly.map(([x, y]) => [cx + (x - cx) * 0.92, cy + (y - cy) * 0.92] as const);
-  const inPoly = (x: number, y: number) => {
-    let inside = false;
-    for (let i = 0, j = eroded.length - 1; i < eroded.length; j = i++) {
-      const [xi, yi] = eroded[i];
-      const [xj, yj] = eroded[j];
-      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-    }
-    return inside;
-  };
-  const CELL = 8;
-  const mw = Math.ceil(W / CELL);
-  const mh = Math.ceil(H / CELL);
-  let mask = new Float32Array(mw * mh);
-  for (let j = 0; j < mh; j++) {
-    for (let i = 0; i < mw; i++) {
-      mask[j * mw + i] = inPoly(((i + 0.5) * W) / mw, ((j + 0.5) * H) / mh) ? 1 : 0;
-    }
-  }
-  for (let pass = 0; pass < 3; pass++) {
-    const sm = new Float32Array(mw * mh);
-    for (let j = 0; j < mh; j++) {
-      for (let i = 0; i < mw; i++) {
-        const c0 = mask[j * mw + i];
-        const lft = i > 0 ? mask[j * mw + i - 1] : c0;
-        const rgt = i < mw - 1 ? mask[j * mw + i + 1] : c0;
-        const up = j > 0 ? mask[(j - 1) * mw + i] : c0;
-        const dn = j < mh - 1 ? mask[(j + 1) * mw + i] : c0;
-        sm[j * mw + i] = (c0 * 4 + lft + rgt + up + dn) / 8;
-      }
-    }
-    mask = sm;
-  }
-  const d = g.getImageData(0, 0, W, H);
+  const d = g.getImageData(0, 0, c.width, c.height);
   const p = d.data;
   const cl = (v: number) => Math.max(0, Math.min(255, v));
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const i = (y * W + x) * 4;
-      const r = p[i];
-      const gg = p[i + 1];
-      const b = p[i + 2];
-      const l = 0.299 * r + 0.587 * gg + 0.114 * b;
-      // 岸上（荷叶/草丛）：保持绿色，轻降饱和 15%
-      let r2 = l + (r - l) * 0.85;
-      let g2 = l + (gg - l) * 0.85;
-      let b2 = l + (b - l) * 0.85;
-      const m = Math.max(0, Math.min(1, mask[(y >> 3) * mw + (x >> 3)]));
-      if (m > 0) {
-        // 水面：绿区压缩映射进 184-208° 青蓝带（水色 133.9° 锚定夏水 190°）+ 去紫 + 增彩
-        let rr = r / 255;
-        let gch = (gg / 255) * 0.965; // 品红向：先收一点全局绿
-        let bb = b / 255;
-        const max = Math.max(rr, gch, bb);
-        const min = Math.min(rr, gch, bb);
-        const d0 = max - min;
-        const ll = (max + min) / 2;
-        let s = d0 === 0 ? 0 : d0 / (1 - Math.abs(2 * ll - 1));
-        let h = 0;
-        if (d0 > 0) {
-          if (max === rr) h = 60 * (((gch - bb) / d0) % 6);
-          else if (max === gch) h = 60 * ((bb - rr) / d0 + 2);
-          else h = 60 * ((rr - gch) / d0 + 4);
-          if (h < 0) h += 360;
-          if (h >= 55 && h <= 175) {
-            h = 190 + (h - 133.9) * 0.45;
-            if (h < 184) h = 184 + (h - 184) * 0.4;
-            if (h > 208) h = 208 - (h - 208) * 0.5;
-            s *= 0.85;
-          }
-        }
-        if (h > 216 && h < 310) s *= 0.45; // 蓝紫去紫
-        if (h >= 170 && h <= 216) s *= 1.75; // 青蓝增彩
-        const L = ll + (ll * ll * (3 - 2 * ll) - ll) * 0.4; // S 曲线加对比
-        const C = (1 - Math.abs(2 * L - 1)) * s;
-        const X = C * (1 - Math.abs(((h / 60) % 2) - 1));
-        const mm = L - C / 2;
-        let r1: number;
-        let g1: number;
-        let b1: number;
-        if (h < 60) { r1 = C; g1 = X; b1 = 0; }
-        else if (h < 120) { r1 = X; g1 = C; b1 = 0; }
-        else if (h < 180) { r1 = 0; g1 = C; b1 = X; }
-        else if (h < 240) { r1 = 0; g1 = X; b1 = C; }
-        else if (h < 300) { r1 = X; g1 = 0; b1 = C; }
-        else { r1 = C; g1 = 0; b1 = X; }
-        const wr = (r1 + mm) * 255;
-        const wg = (g1 + mm) * 255;
-        const wb = (b1 + mm) * 255;
-        r2 = r + (wr - r) * m;
-        g2 = gg + (wg - gg) * m;
-        b2 = b + (wb - b) * m;
+  for (let i = 0; i < p.length; i += 4) {
+    let r = p[i] / 255;
+    let gch = (p[i + 1] / 255) * 0.965; // 品红向：先收一点全局绿
+    let b = p[i + 2] / 255;
+    const max = Math.max(r, gch, b);
+    const min = Math.min(r, gch, b);
+    const d0 = max - min;
+    const l = (max + min) / 2;
+    let s = d0 === 0 ? 0 : d0 / (1 - Math.abs(2 * l - 1));
+    let h = 0;
+    if (d0 > 0) {
+      if (max === r) h = 60 * (((gch - b) / d0) % 6);
+      else if (max === gch) h = 60 * ((b - r) / d0 + 2);
+      else h = 60 * ((r - gch) / d0 + 4);
+      if (h < 0) h += 360;
+      if (h >= 55 && h <= 175) {
+        // 压缩映射(收紧): 全部锚进 184-208° 的青蓝——190 为夏水锚点, 上不越 208(纯蓝)、
+        // 下不过 184(绿青)
+        h = 190 + (h - 133.9) * 0.45;
+        if (h < 184) h = 184 + (h - 184) * 0.4;
+        if (h > 208) h = 208 - (h - 208) * 0.5;
+        s *= 0.85;
       }
-      p[i] = cl(r2);
-      p[i + 1] = cl(g2);
-      p[i + 2] = cl(b2);
     }
+    // 蓝紫去紫: 216-300° 的蓝紫斑降彩度成蓝灰云斑
+    if (h > 216 && h < 310) s *= 0.45;
+    // 定向增彩：只增真青蓝(170-216°)
+    if (h >= 170 && h <= 216) s *= 1.75;
+    if (h >= 320 || h <= 22) s *= 1.3;
+    // S 曲线加对比
+    const L = l + (l * l * (3 - 2 * l) - l) * 0.4;
+    const C = (1 - Math.abs(2 * L - 1)) * s;
+    const X = C * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = L - C / 2;
+    let rr: number;
+    let gg: number;
+    let bb: number;
+    if (h < 60) { rr = C; gg = X; bb = 0; }
+    else if (h < 120) { rr = X; gg = C; bb = 0; }
+    else if (h < 180) { rr = 0; gg = C; bb = X; }
+    else if (h < 240) { rr = 0; gg = X; bb = C; }
+    else if (h < 300) { rr = X; gg = 0; bb = C; }
+    else { rr = C; gg = 0; bb = X; }
+    // 低彩暗部再压一成（石头/墨色）
+    const dark = s < 0.1 && L < 0.6 ? 0.92 : 1;
+    p[i] = cl((rr + m) * 255 * dark);
+    p[i + 1] = cl((gg + m) * 255 * dark);
+    p[i + 2] = cl((bb + m) * 255 * dark);
   }
   g.putImageData(d, 0, 0);
   return c;
@@ -367,7 +312,7 @@ const bgTexs: Record<string, Texture> = {
   // season id 仍沿用 'v7'（URL ?season=v7 与壳配置的既有取值）；v7=默认荷塘=夏景。
   // 四季图与 v7 是同一构图的换季重绘，直接用原画不洗白——换季交叉溶解时色调才连得上。
   v7: Texture.from(bgDefaultI),
-  spring: Texture.from(softenGreen(bgSpringI, ZONES.v7)),
+  spring: Texture.from(softenGreen(bgSpringI)),
   autumn: Texture.from(bgAutumnI),
   winter: winterBaked.base,
 };
