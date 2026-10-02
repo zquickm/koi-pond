@@ -26,7 +26,7 @@ export class ClockWidget {
   private holdMax = new Float32Array(0); // 每一列最多挂得住多厚（小字挂得少，不然字被埋掉）
   private cool = new Float32Array(0); // 刚塌过的列：冷却期内不再塌，掉落才有间隔
   private slumps: {
-    x: number; y: number; vx: number; vy: number; r: number; rot: number; vr: number; a: number;
+    x: number; y: number; vy: number; r: number; a: number;
     lumps: { dx: number; dy: number; r: number }[];
   }[] = [];
   private dot: HTMLCanvasElement | null = null; // 软边白点（雪絮的笔刷）
@@ -176,7 +176,7 @@ export class ClockWidget {
             r: 1.3 + Math.random() * 1.8,
             vy: 7 + Math.random() * 13,
             ph: Math.random() * Math.PI * 2,
-            sw: 2 + Math.random() * 5,
+            sw: 0.8 + Math.random() * 1.8,
             a: 0.45 + Math.random() * 0.5,
           });
         }
@@ -289,10 +289,9 @@ export class ClockWidget {
     // 2) 滑落下来的雪：一团小絮（几个软边点拼成），先垫冷影再上白
     const white = this.softDot();
     const cool = this.softDot(true);
+    cx.save();
     for (const d of this.slumps) {
       const a = Math.max(0, Math.min(1, d.a));
-      cx.save();
-      cx.rotate(d.rot);
       for (const [img, off, al] of [
         [cool, 1.8, a * 0.5],
         [white, 0, a],
@@ -304,8 +303,8 @@ export class ClockWidget {
           cx.drawImage(img, px - L.r, py - L.r, L.r * 2, L.r * 2);
         }
       }
-      cx.restore();
     }
+    cx.restore();
 
     // 3) 飘雪（在最前）
     cx.save();
@@ -388,9 +387,6 @@ export class ClockWidget {
           y: tops[Math.min(tops.length - 1, Math.max(0, cxp - lo))],
           r: R,
           vy: 0,
-          vx: 0,
-          rot: Math.random() * Math.PI * 2,
-          vr: (Math.random() - 0.5) * 0.7,
           a: 0.95,
           lumps,
         });
@@ -430,8 +426,7 @@ export class ClockWidget {
     for (const d of this.slumps) {
       // 雪絮轻轻往下飘：重力很小、很快到终速，还带一点左右摆
       d.vy = Math.min(d.vy + 46 * dt, 32); // 自由落体 + 空气阻力（到终速）
-      d.y += d.vy * dt; // 只往下，不横飘
-      d.rot += d.vr * dt;
+      d.y += d.vy * dt; // 只往下：不横飘、不自转
       d.a -= 0.22 * dt;
     }
     this.slumps = this.slumps.filter((d) => d.a > 0 && d.y < this.ch + 24);
