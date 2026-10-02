@@ -281,11 +281,11 @@ export class Fireflies {
 /** 季节降雪（冬季）：三层景深的白圆点，一路飘大，落到水面上化成融痕；k 控制强弱。
  *
  *  3D 感是三层叠出来的，不靠虚焦光晕（夜里那种发光扩散已经去掉）：
- *    · 分层——远景小而实、中景居中、近景大而淡，落速与摆幅一起随层变（50/34/16，共 90 颗）；
+ *    · 分层——远景小、中景居中、近景大（都是硬边实心圆，不靠虚化），落速与摆幅随层变（50/34/16）；
  *    · 透视——每颗一边下落一边微微变大（1.0→1.25 左右），像朝镜头飘过来；
  *    · 落水——飘到水面就消失，落点画一圈冷白融痕，近景的圈更大更急；
  *      落在岸上不化，接着往下飘，等落到水面为止（所以不会在半空凭空消失）。
- *  圆点本身仍是实心白圆 + 极窄冷蓝边。 */
+ *  圆点本身是硬边实心白圆，整颗不做模糊/渐隐。 */
 const SNOW_TINT = 0xf4faff; // 近乎白，只往冷里带一丝丝
 type Tier = 0 | 1 | 2;
 type Flake = {
@@ -294,17 +294,17 @@ type Flake = {
 };
 type Melt = { x: number; y: number; r: number; v: number; a: number };
 
-/** 圆点贴图：实心白圆 + 极窄的冷蓝边（不是晕，别让它夜里发光） */
+/** 圆点贴图：硬边实心白圆——只在最外 1px 做抗锯齿，整颗没有渐隐（反馈：雪不要模糊效果） */
 function snowDot(S = 64) {
   const c = document.createElement('canvas');
   c.width = c.height = S;
   const g = c.getContext('2d')!;
   const h = S / 2;
   const grd = g.createRadialGradient(h, h, 0, h, h, h);
-  grd.addColorStop(0, 'rgba(255,255,255,1)');
-  grd.addColorStop(0.72, 'rgba(253,254,255,0.99)');
-  grd.addColorStop(0.9, 'rgba(238,246,255,0.72)');
-  grd.addColorStop(1, 'rgba(220,234,250,0)');
+  grd.addColorStop(0, 'rgba(254,255,255,1)');
+  grd.addColorStop(0.9, 'rgba(252,253,255,1)');
+  grd.addColorStop(0.97, 'rgba(240,247,255,0.88)'); // 抗锯齿过渡，别再加宽
+  grd.addColorStop(1, 'rgba(230,241,252,0)');
   g.fillStyle = grd;
   g.fillRect(0, 0, S, S);
   return c;
@@ -393,20 +393,20 @@ export class Snowfall {
       // 远景小雪：小、实、慢、几乎不摆
       tier = 0;
       s = 0.065 + Math.random() * 0.03;
-      a = 0.9;
+      a = 0.95;
       vy = 12 + Math.random() * 6;
       sw = 3;
     } else if (r < 0.84) {
       tier = 1;
       s = 0.13 + Math.random() * 0.055;
-      a = 0.78;
+      a = 0.9;
       vy = 18 + Math.random() * 9;
       sw = 5;
     } else {
       // 近景：大、淡、快、摆幅大（离镜头近）
       tier = 2;
       s = 0.23 + Math.random() * 0.11;
-      a = 0.6;
+      a = 0.82;
       vy = 28 + Math.random() * 14;
       sw = 8;
     }
