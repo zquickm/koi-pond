@@ -278,40 +278,27 @@ export class Fireflies {
   }
 }
 
-/** 季节降雪（冬季）：白圆点，三层景深（远景小 / 中景 / 近景大而虚），缓飘+融痕；k 控制强弱。
+/** 季节降雪（冬季）：统一的白色圆点，缓飘+融痕；k 控制强弱。
  *
- *  刻意画得简单——就是白圆点，不做花样：远景小而实、中景中等、近景大而虚（alpha 低、边更软），
- *  90 颗里三层按 50/34/16 分。唯一的小处理是色：冬季底图是一张很淡的暖白纸（正午实测 L≈220），
- *  所以圆的芯留纯白（亮过底子才看得见），只有软边收一档冷蓝（雪在阴影里本来就偏蓝），
- *  tint 再极轻地往冷里带一点，白点边缘就有了微差。 */
-type Tier = 0 | 1 | 2;
-type Flake = { sp: Sprite; x: number; y: number; vx: number; vy: number; ph: number; sw: number; s: number; a: number; tint: number; tier: Tier; life: number; ttl: number };
+ *  刻意画得一样——90 颗同尺寸、同浓淡、同一张贴图，不做近大远小的分层：
+ *  夜里也就不会有大颗虚焦那种"扩散/发光"的观感，整片雪就是干干净净的白点。
+ *  色上只留一点点冷蓝：冬季底图是很淡的暖白纸（正午实测 L≈220），芯留纯白、边上极窄一圈冷蓝。 */
+const SNOW_SIZE = 0.125; // 64px 贴图 × 0.125 ≈ 8px 圆点
+const SNOW_ALPHA = 0.92;
+const SNOW_TINT = 0xf4faff; // 近乎白，只往冷里带一丝丝
+type Flake = { sp: Sprite; x: number; y: number; vx: number; vy: number; ph: number; sw: number; life: number; ttl: number };
 
-/** 两个色之间的插值（tint 只做乘法，冷蓝的深浅靠这里定） */
-function mixHex(a: number, b: number, t: number) {
-  const ch = (v: number, sh: number) => (v >> sh) & 255;
-  const m = (sh: number) => Math.round(ch(a, sh) + (ch(b, sh) - ch(a, sh)) * t);
-  return (m(16) << 16) | (m(8) << 8) | m(0);
-}
-
-/** 圆点贴图：soft=false 边略实（远/中景），soft=true 更软更散（近景虚焦） */
-function snowDot(soft: boolean, S = 64) {
+/** 圆点贴图：实心白圆 + 极窄的冷蓝边（不是晕，别让它夜里发光） */
+function snowDot(S = 64) {
   const c = document.createElement('canvas');
   c.width = c.height = S;
   const g = c.getContext('2d')!;
   const h = S / 2;
   const grd = g.createRadialGradient(h, h, 0, h, h, h);
-  if (!soft) {
-    grd.addColorStop(0, 'rgba(255,255,255,1)');
-    grd.addColorStop(0.62, 'rgba(253,254,255,0.97)');
-    grd.addColorStop(0.86, 'rgba(232,242,254,0.45)'); // 冷蓝软边
-    grd.addColorStop(1, 'rgba(214,230,248,0)');
-  } else {
-    grd.addColorStop(0, 'rgba(255,255,255,0.98)');
-    grd.addColorStop(0.3, 'rgba(250,253,255,0.8)');
-    grd.addColorStop(0.68, 'rgba(230,241,254,0.36)');
-    grd.addColorStop(1, 'rgba(210,228,248,0)');
-  }
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.72, 'rgba(253,254,255,0.99)');
+  grd.addColorStop(0.9, 'rgba(238,246,255,0.72)');
+  grd.addColorStop(1, 'rgba(220,234,250,0)');
   g.fillStyle = grd;
   g.fillRect(0, 0, S, S);
   return c;
@@ -322,10 +309,10 @@ export class Snowfall {
   private flakes: Flake[] = [];
   private W = 800;
   private H = 600;
-  private texs: Texture[];
+  private tex: Texture;
 
   constructor(private count = 90) {
-    this.texs = [Texture.from(snowDot(false)), Texture.from(snowDot(true))];
+    this.tex = Texture.from(snowDot());
   }
 
   layout(W: number, H: number) {
@@ -337,69 +324,34 @@ export class Snowfall {
     this.container.visible = k > 0.02;
     if (k <= 0.02) return;
     while (this.flakes.length < this.count) {
-      const f: Flake = { sp: new Sprite(this.texs[0]), ...this.spawn() };
+      const f: Flake = { sp: new Sprite(this.tex), ...this.spawn() };
       f.sp.anchor.set(0.5);
-      f.sp.texture = this.texs[f.tier === 2 ? 1 : 0];
+      f.sp.scale.set(SNOW_SIZE);
+      f.sp.tint = SNOW_TINT;
       this.container.addChild(f.sp);
       this.flakes.push(f);
     }
     for (const f of this.flakes) {
       f.life += dt;
-      f.x += (f.vx + Math.sin(t * (f.tier === 2 ? 0.34 : 0.62) + f.ph) * f.sw) * dt;
+      f.x += (f.vx + Math.sin(t * 0.62 + f.ph) * f.sw) * dt;
       f.y += f.vy * dt;
-      if (f.life > f.ttl || f.y > this.H + 40 || f.x < -60 || f.x > this.W + 60) {
-        if (onMelt && f.tier > 0 && f.y < this.H + 10 && Math.random() < 0.15) onMelt(f.x / this.W, f.y / this.H);
+      if (f.life > f.ttl || f.y > this.H + 30 || f.x < -50 || f.x > this.W + 50) {
+        if (onMelt && f.y < this.H + 10 && Math.random() < 0.15) onMelt(f.x / this.W, f.y / this.H);
         Object.assign(f, this.spawn());
-        f.sp.texture = this.texs[f.tier === 2 ? 1 : 0];
       }
       f.sp.position.set(f.x, f.y);
-      f.sp.alpha = k * f.a * Math.min(1, f.life * 1.6);
-      f.sp.scale.set(f.s);
-      f.sp.tint = f.tint;
+      f.sp.alpha = k * SNOW_ALPHA * Math.min(1, f.life * 1.6);
     }
   }
 
-  /** 三层景深：尺寸/落速/摆动随层变（近景大、慢、淡）；冷蓝 tint 只是浅浅一层 */
   private spawn(): Omit<Flake, 'sp'> {
-    const r = Math.random();
-    const j = Math.random();
-    let tier: Tier;
-    let s: number;
-    let a: number;
-    let vy: number;
-    let tint: number;
-    if (r < 0.5) {
-      // 远景小雪：密、小、实，负责"这是在下雪"的整体质感
-      tier = 0;
-      s = 0.085 + Math.random() * 0.05;
-      a = 1;
-      vy = 9 + Math.random() * 12;
-      tint = mixHex(0xfdfeff, 0xf2f8ff, j);
-    } else if (r < 0.84) {
-      tier = 1;
-      s = 0.17 + Math.random() * 0.1;
-      a = 0.85;
-      vy = 12 + Math.random() * 13;
-      tint = mixHex(0xfbfeff, 0xedf5ff, j);
-    } else {
-      // 近景虚焦：大、淡，越大越淡
-      tier = 2;
-      s = 0.5 + Math.random() * 0.55;
-      a = 0.34 - (s - 0.5) * 0.14;
-      vy = 16 + Math.random() * 18;
-      tint = mixHex(0xf6fbff, 0xe6f0fd, j);
-    }
     return {
       x: Math.random() * (this.W + 60) - 30,
       y: Math.random() * this.H,
       vx: (Math.random() - 0.5) * 10,
-      vy,
+      vy: 12 + Math.random() * 8,
       ph: Math.random() * Math.PI * 2,
-      sw: 4 + s * 9, // 摆动幅度随颗粒大小（近景飘得更慢更沉）
-      s,
-      a,
-      tint,
-      tier,
+      sw: 5,
       life: 0,
       ttl: 12 + Math.random() * 14,
     };
