@@ -7,7 +7,10 @@
 //   · 把字自己画进 canvas 再重画 —— 错版衬影得自己复刻，结果字外面糊了一圈深色。
 //   现在的做法：DOM 文字原样保留（CSS 那套衬影一个字不动），离屏 canvas **只用来量**每一列的
 //   笔画顶边，然后把雪**盖**在笔画顶上——雪是另外涂上去的一层，不会复制字形，所以不重影。
+//   换字也不清场（2026-10-03 反馈）：分钟一变，旧雪跟着新字顶落位——接得住的原样落上去
+//   （resettle.ts），接不住的掀成雪絮掉下去；没变的列（时针、日期）的雪继续攒。
 import { Solar } from 'lunar-javascript';
+import { planResettle } from './resettle';
 
 const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -232,6 +235,7 @@ export class ClockWidget {
     const img = tx.getImageData(0, 0, this.textCv!.width, this.textCv!.height).data;
     const pw = this.textCv!.width;
     const ph = this.textCv!.height;
+    const oldTop = this.topY; // 上一轮的字形顶边，换字时旧雪靠它找新位置
     this.topY = new Int32Array(W).fill(-1);
     for (let x = 0; x < W; x++) {
       const px = Math.min(pw - 1, Math.round(x * dpr));
@@ -251,10 +255,46 @@ export class ClockWidget {
       for (const [b0, b1, h] of bands) if (t >= b0 - 1 && t <= b1) hold = h;
       this.holdMax[x] = hold;
     }
-    // 换字（每分钟）＝ 重新开始积：从 0 长起
-    this.pile = new Float32Array(W);
-    this.cool = new Float32Array(W);
-    this.slumps = [];
+    if (this.pile.length !== W) {
+      // 首次/窗口尺寸变了：画布坐标系全变，从 0 长起
+      this.pile = new Float32Array(W);
+      this.cool = new Float32Array(W);
+      this.slumps = [];
+    } else {
+      // 换字（每分钟）不清场：旧雪落到新字上（接不住的掀成雪絮）
+      for (const r of planResettle(oldTop, this.topY, this.pile, this.holdMax)) {
+        this.shedChunks(r.lo, r.hi, r.tops, r.removed);
+      }
+    }
+  }
+
+  /** 把 [lo,hi] 这片雪（体积分 removed）掀成 1-3 块雪絮，从 tops 给的雪面处垂直落下去 */
+  private shedChunks(lo: number, hi: number, tops: number[], removed: number) {
+    const chunks = Math.max(1, Math.min(3, Math.round((hi - lo + 1) / 12)));
+    for (let c = 0; c < chunks; c++) {
+      const cxp = Math.round(lo + ((hi - lo) * (c + 0.5)) / chunks);
+      const R = Math.max(2.6, Math.min(11, 2 + Math.sqrt(removed / chunks) * 1.1));
+      const lumps: { dx: number; dy: number; r: number }[] = [];
+      const nl = 3 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < nl; i++) {
+        const ang = (i / nl) * Math.PI * 2 + Math.random() * 0.6;
+        const dist = Math.random() * 0.45;
+        lumps.push({
+          dx: Math.cos(ang) * dist,
+          dy: Math.sin(ang) * dist * 1.15,
+          r: R * (0.45 + Math.random() * 0.4),
+        });
+      }
+      this.slumps.push({
+        // 从雪面起步（不从字里冒出来），只垂直往下掉
+        x: cxp,
+        y: tops[Math.min(tops.length - 1, Math.max(0, cxp - lo))],
+        r: R,
+        vy: 0,
+        a: 0.95,
+        lumps,
+      });
+    }
   }
 
   private drawSnow(dt: number) {
@@ -366,31 +406,7 @@ export class ClockWidget {
         removed += this.pile[j] * 0.85;
       }
       // 掀下来的雪：按体积分成几块往下掉
-      const chunks = Math.max(1, Math.min(3, Math.round((hi - lo + 1) / 12)));
-      for (let c = 0; c < chunks; c++) {
-        const cxp = Math.round(lo + ((hi - lo) * (c + 0.5)) / chunks);
-        const R = Math.max(2.6, Math.min(11, 2 + Math.sqrt(removed / chunks) * 1.1));
-        const lumps: { dx: number; dy: number; r: number }[] = [];
-        const nl = 3 + Math.floor(Math.random() * 3);
-        for (let i = 0; i < nl; i++) {
-          const ang = (i / nl) * Math.PI * 2 + Math.random() * 0.6;
-          const dist = Math.random() * 0.45;
-          lumps.push({
-            dx: Math.cos(ang) * dist,
-            dy: Math.sin(ang) * dist * 1.15,
-            r: R * (0.45 + Math.random() * 0.4),
-          });
-        }
-        this.slumps.push({
-          // 从刚塌下来的那一层雪面起步（不是从字里冒出来），而且只垂直往下掉
-          x: cxp,
-          y: tops[Math.min(tops.length - 1, Math.max(0, cxp - lo))],
-          r: R,
-          vy: 0,
-          a: 0.95,
-          lumps,
-        });
-      }
+      this.shedChunks(lo, hi, tops, removed);
       // 雪块的位置定好之后再削雪、上冷却
       for (let j = lo; j <= hi; j++) {
         this.pile[j] *= 0.15; // 只留一点点，重新积起来才有"从 0 开始"的感觉
