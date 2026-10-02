@@ -359,12 +359,12 @@ export class ClockWidget {
       const th = this.holdMax[x] * 0.45;
       while (lo > Math.max(0, x - 14) && this.topY[lo - 1] >= 0 && this.pile[lo - 1] > th) lo--;
       while (hi < Math.min(w - 1, x + 14) && this.topY[hi + 1] >= 0 && this.pile[hi + 1] > th) hi++;
-      const yTop = this.topY[x] + this.pile[x];
+      // 先把这一片"雪面"在哪记下来（等会儿雪块就从这儿脱开往下掉），再削雪
+      const tops: number[] = [];
       let removed = 0;
       for (let j = lo; j <= hi; j++) {
+        tops.push(this.topY[j] + this.pile[j]);
         removed += this.pile[j] * 0.85;
-        this.pile[j] *= 0.15; // 只留一点点，重新积起来才有"从 0 开始"的感觉
-        this.cool[j] = 6 + Math.random() * 4;
       }
       // 掀下来的雪：按体积分成几块往下掉
       const chunks = Math.max(1, Math.min(3, Math.round((hi - lo + 1) / 12)));
@@ -383,16 +383,22 @@ export class ClockWidget {
           });
         }
         this.slumps.push({
+          // 从刚塌下来的那一层雪面起步（不是从字里冒出来），而且只垂直往下掉
           x: cxp,
-          y: this.topY[cxp] + this.pile[cxp] * 0.5 + 1,
+          y: tops[Math.min(tops.length - 1, Math.max(0, cxp - lo))],
           r: R,
-          vy: 1 + Math.random() * 3,
-          vx: (Math.random() - 0.5) * 4,
+          vy: 0,
+          vx: 0,
           rot: Math.random() * Math.PI * 2,
-          vr: (Math.random() - 0.5) * 0.8,
+          vr: (Math.random() - 0.5) * 0.7,
           a: 0.95,
           lumps,
         });
+      }
+      // 雪块的位置定好之后再削雪、上冷却
+      for (let j = lo; j <= hi; j++) {
+        this.pile[j] *= 0.15; // 只留一点点，重新积起来才有"从 0 开始"的感觉
+        this.cool[j] = 6 + Math.random() * 4;
       }
       break; // 一帧只塌一处，掉落是一个一个来的
     }
@@ -423,10 +429,8 @@ export class ClockWidget {
   private updateSlumps(dt: number) {
     for (const d of this.slumps) {
       // 雪絮轻轻往下飘：重力很小、很快到终速，还带一点左右摆
-      d.vy = Math.min(d.vy + 42 * dt, 30);
-      d.y += d.vy * dt;
-      d.x += (d.vx + Math.sin(this.t * 1.6 + d.rot * 3) * 5) * dt;
-      d.vx *= 1 - Math.min(1, 0.7 * dt);
+      d.vy = Math.min(d.vy + 46 * dt, 32); // 自由落体 + 空气阻力（到终速）
+      d.y += d.vy * dt; // 只往下，不横飘
       d.rot += d.vr * dt;
       d.a -= 0.22 * dt;
     }
