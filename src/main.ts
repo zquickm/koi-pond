@@ -271,12 +271,12 @@ function softenGreen(im: HTMLImageElement): HTMLCanvasElement {
       else h = 60 * ((r - gch) / d0 + 4);
       if (h < 0) h += 360;
       if (h >= 55 && h <= 175) {
-        h += 35; // 绿区转向青蓝
+        h += 42; // 绿区转向青蓝
         s *= 0.9;
       }
     }
     // 定向增彩：池塘的青蓝更饱和（用户: 池塘再蓝些）、荷花的粉更足（用户: 荷花粉些）
-    if (h >= 165 && h <= 265) s *= 1.25;
+    if (h >= 165 && h <= 265) s *= 1.45;
     if (h >= 320 || h <= 22) s *= 1.3;
     // S 曲线加对比
     const L = l + (l * l * (3 - 2 * l) - l) * 0.4;
