@@ -25,7 +25,12 @@ export class ClockWidget {
   private pile = new Float32Array(0); // 每一列积了多厚的雪（从 0 开始长）
   private holdMax = new Float32Array(0); // 每一列最多挂得住多厚（小字挂得少，不然字被埋掉）
   private cool = new Float32Array(0); // 刚塌过的列：冷却期内不再塌，掉落才有间隔
-  private slumps: { x: number; y: number; r: number; vy: number; vx: number; a: number }[] = [];
+  private slumps: {
+    x: number; y: number; vx: number; vy: number; r: number; rot: number; vr: number; a: number;
+    lumps: { dx: number; dy: number; r: number }[];
+  }[] = [];
+  private dot: HTMLCanvasElement | null = null; // 软边白点（雪絮的笔刷）
+  private dotCool: HTMLCanvasElement | null = null; // 软边冷色点（雪絮的垫底影）
   private snowy = false;
   private lastText = '';
   private flakes: Flake[] = [];
@@ -96,6 +101,27 @@ export class ClockWidget {
   }
 
   // —— 冬季：canvas 重画这三行字 + 字顶积雪 + 局部飘雪 ——
+
+  /** 软边圆点：雪絮由几个它拼出来，比硬圆好看。冷色那枚用来垫底 */
+  private softDot(cool = false) {
+    if (cool && this.dotCool) return this.dotCool;
+    if (!cool && this.dot) return this.dot;
+    const S = 64;
+    const c = document.createElement('canvas');
+    c.width = c.height = S;
+    const g = c.getContext('2d')!;
+    const rgb = cool ? '104,136,172' : '255,255,255';
+    const grd = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    grd.addColorStop(0, `rgba(${rgb},${cool ? 0.75 : 1})`);
+    grd.addColorStop(0.45, `rgba(${rgb},${cool ? 0.6 : 0.92})`);
+    grd.addColorStop(0.78, `rgba(${rgb},${cool ? 0.24 : 0.42})`);
+    grd.addColorStop(1, `rgba(${rgb},0)`);
+    g.fillStyle = grd;
+    g.fillRect(0, 0, S, S);
+    if (cool) this.dotCool = c;
+    else this.dot = c;
+    return c;
+  }
 
   private enableSnow() {
     this.snowy = true;
@@ -196,7 +222,7 @@ export class ClockWidget {
       const desc = m.fontBoundingBoxDescent || fs * 0.2;
       const r = el.getBoundingClientRect();
       const top = r.top - box.top + this.pad;
-      bands.push([top, top + r.height, Math.max(2.2, Math.min(7.5, fs * 0.11))]);
+      bands.push([top, top + r.height, Math.max(3.2, Math.min(12, fs * 0.17))]);
       const baseY = top + (r.height - (asc + desc)) / 2 + asc;
       // 只画剪影：这一层永远不显示，只用来量笔画顶边
       tx.fillStyle = '#000';
@@ -260,18 +286,26 @@ export class ClockWidget {
     cx.fill(cap);
     cx.restore();
 
-    // 2) 滑落下来的雪块
-    cx.save();
-    cx.shadowColor = 'rgba(104,136,172,.5)';
-    cx.shadowBlur = 3;
-    cx.shadowOffsetY = 1;
+    // 2) 滑落下来的雪：一团小絮（几个软边点拼成），先垫冷影再上白
+    const white = this.softDot();
+    const cool = this.softDot(true);
     for (const d of this.slumps) {
-      cx.beginPath();
-      cx.ellipse(d.x, d.y, d.r * 0.8, d.r * 1.25, 0, 0, Math.PI * 2);
-      cx.fillStyle = `rgba(255,255,255,${Math.max(0, Math.min(1, d.a)).toFixed(3)})`;
-      cx.fill();
+      const a = Math.max(0, Math.min(1, d.a));
+      cx.save();
+      cx.rotate(d.rot);
+      for (const [img, off, al] of [
+        [cool, 1.8, a * 0.5],
+        [white, 0, a],
+      ] as [HTMLCanvasElement, number, number][]) {
+        cx.globalAlpha = Math.max(0, Math.min(1, al));
+        for (const L of d.lumps) {
+          const px = L.dx * d.r + d.x;
+          const py = L.dy * d.r + d.y + off;
+          cx.drawImage(img, px - L.r, py - L.r, L.r * 2, L.r * 2);
+        }
+      }
+      cx.restore();
     }
-    cx.restore();
 
     // 3) 飘雪（在最前）
     cx.save();
@@ -335,14 +369,29 @@ export class ClockWidget {
       // 掀下来的雪：按体积分成几块往下掉
       const chunks = Math.max(1, Math.min(3, Math.round((hi - lo + 1) / 12)));
       for (let c = 0; c < chunks; c++) {
-        const cxp = lo + ((hi - lo) * (c + 0.5)) / chunks;
+        const cxp = Math.round(lo + ((hi - lo) * (c + 0.5)) / chunks);
+        const R = Math.max(2.6, Math.min(11, 2 + Math.sqrt(removed / chunks) * 1.1));
+        const lumps: { dx: number; dy: number; r: number }[] = [];
+        const nl = 3 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < nl; i++) {
+          const ang = (i / nl) * Math.PI * 2 + Math.random() * 0.6;
+          const dist = Math.random() * 0.45;
+          lumps.push({
+            dx: Math.cos(ang) * dist,
+            dy: Math.sin(ang) * dist * 1.15,
+            r: R * (0.45 + Math.random() * 0.4),
+          });
+        }
         this.slumps.push({
           x: cxp,
-          y: this.topY[Math.round(cxp)] + this.pile[Math.round(cxp)] * 0.5 + 1,
-          r: Math.max(2.4, Math.min(11, 2 + Math.sqrt(removed / chunks) * 1.1)),
-          vy: 6 + Math.random() * 5,
-          vx: (Math.random() - 0.5) * 10,
+          y: this.topY[cxp] + this.pile[cxp] * 0.5 + 1,
+          r: R,
+          vy: 1 + Math.random() * 3,
+          vx: (Math.random() - 0.5) * 4,
+          rot: Math.random() * Math.PI * 2,
+          vr: (Math.random() - 0.5) * 0.8,
           a: 0.95,
+          lumps,
         });
       }
       break; // 一帧只塌一处，掉落是一个一个来的
@@ -373,11 +422,14 @@ export class ClockWidget {
 
   private updateSlumps(dt: number) {
     for (const d of this.slumps) {
-      d.vy += 130 * dt;
+      // 雪絮轻轻往下飘：重力很小、很快到终速，还带一点左右摆
+      d.vy = Math.min(d.vy + 42 * dt, 30);
       d.y += d.vy * dt;
-      d.x += d.vx * dt;
-      d.a -= 0.45 * dt;
+      d.x += (d.vx + Math.sin(this.t * 1.6 + d.rot * 3) * 5) * dt;
+      d.vx *= 1 - Math.min(1, 0.7 * dt);
+      d.rot += d.vr * dt;
+      d.a -= 0.22 * dt;
     }
-    this.slumps = this.slumps.filter((d) => d.a > 0 && d.y < this.ch + 20);
+    this.slumps = this.slumps.filter((d) => d.a > 0 && d.y < this.ch + 24);
   }
 }
