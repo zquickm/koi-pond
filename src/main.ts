@@ -361,9 +361,11 @@ app.ticker.add((tk) => {
   critters.update(dt, T, W, H, wake, dflyOn);
   // 蜻蜓跟昼夜色调一起染（它在 dayTint 层之上，不染就会下午比四周亮）
   critters.air.tint = dayTint.sp.tint;
-  // 萤火虫：黄昏 18h 起随暮色渐显（初萤），凌晨 5.5h 前渐隐；冬季无萤（雪夜不出虫，2026-10-03 反馈）
-  const nightK = Math.max(0, Math.min(1, nfHour >= 12 ? (nfHour - 18) / 1.2 : (5.5 - nfHour) / 1.2));
-  fireflies.update(T, cfg.season === 'winter' ? 0 : nightK);
+  // 萤火虫按中国真实情况（2026-10-03）：日落后约 19:20 渐现、上半夜最盛，午夜后渐稀、1:30 前收场；
+  // 密度=夏景(默认)12 只、春末/初秋零星 4 只、冬无（萤火虫盛发季就是夏天，冬天没有萤火虫）
+  const ffK = nfHour >= 12 ? Math.max(0, Math.min(1, nfHour - 19.2)) : Math.max(0, Math.min(1, 1.5 - nfHour));
+  const ffCount = cfg.season === 'v7' ? 12 : cfg.season === 'spring' || cfg.season === 'autumn' ? 4 : 0;
+  fireflies.update(T, ffK, ffCount);
   // 季节氛围：春季小雨 / 夏季随机小雨·大雨 / 冬季随机降雪，每场约 1 分钟、间隔随机
   if (cfg.season === 'spring' || cfg.season === 'v7' || cfg.season === 'winter') {
     seasonT -= dt;

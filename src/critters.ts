@@ -208,8 +208,9 @@ class Dragonfly {
   }
 }
 
-/** 萤火虫光点：不是真的萤火虫——一团团缓慢游荡的黄色光晕。
- *  夜间出现（main.ts 按小时传 nightK），多数绕草丛簇无规律飞，偶尔两只飘在水面上。 */
+/** 萤火虫光点：不是真的萤火虫——一团团缓慢游荡的黄绿色光晕。
+ *  按中国真实情况设计（2026-10-03）：盛夏夜里同屏十来只（好点位量级），春末/初秋零星，
+ *  冬季无；作息在 main.ts 里管（日落后渐现、午夜后渐稀）。 */
 export class Fireflies {
   readonly container = new Container();
   private flies: {
@@ -223,20 +224,20 @@ export class Fireflies {
     c.width = c.height = 64;
     const g = c.getContext('2d')!;
     const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-    grd.addColorStop(0, 'rgba(255,246,190,0.9)');
-    grd.addColorStop(0.3, 'rgba(255,232,140,0.45)');
-    grd.addColorStop(0.65, 'rgba(255,222,120,0.12)');
-    grd.addColorStop(1, 'rgba(255,220,120,0)');
+    grd.addColorStop(0, 'rgba(240,252,190,0.9)'); // 黄绿光（真实萤火虫的光色）
+    grd.addColorStop(0.3, 'rgba(233,246,150,0.45)');
+    grd.addColorStop(0.65, 'rgba(230,240,130,0.12)');
+    grd.addColorStop(1, 'rgba(228,238,120,0)');
     g.fillStyle = grd;
     g.fillRect(0, 0, 64, 64);
     const glow = Texture.from(c);
     this.container.blendMode = 'add';
-    // 草丛簇中心（v8 画面的岸缘草丛/荷叶边），最后两只飘水面
+    // 草丛簇中心（v8 画面的岸缘草丛/荷叶边），最后 3 只飘水面
     const clusters: [number, number][] = [
       [0.045, 0.42], [0.09, 0.8], [0.05, 0.62], [0.88, 0.8],
     ];
-    for (let i = 0; i < 17; i++) {
-      const overWater = i >= 14;
+    for (let i = 0; i < 12; i++) {
+      const overWater = i >= 9;
       const cl = clusters[i % clusters.length];
       const jit = () => Math.random() - 0.5;
       const ax = overWater ? 0.35 + Math.random() * 0.4 : cl[0] + jit() * 0.03;
@@ -252,8 +253,8 @@ export class Fireflies {
         ph: Math.random() * Math.PI * 2,
         sa: 0.1 + Math.random() * 0.18,
         sb: 0.16 + Math.random() * 0.22,
-        pr: 0.45 + Math.random() * 0.8,
-        big: Math.random() < 0.4,
+        pr: 1.3 + Math.random() * 1.3, // 每 2.4-4.8 秒一闪，真实萤火虫的节奏
+        big: Math.random() < 0.25,
       });
     }
   }
@@ -263,15 +264,17 @@ export class Fireflies {
     this.H = H;
   }
 
-  update(t: number, nightK: number) {
-    this.container.visible = nightK > 0.01;
-    for (const f of this.flies) {
+  /** n = 本季出现的只数上限（按季节传：夏 12 / 春秋 4 / 冬 0），只有前 n 只会亮 */
+  update(t: number, k: number, n: number) {
+    this.container.visible = k > 0.01 && n > 0;
+    for (let i = 0; i < this.flies.length; i++) {
+      const f = this.flies[i];
       // 缓慢无规律游荡：双频正弦叠加绕簇心漂
       const x = (f.ax + Math.sin(t * f.sa + f.ph) * f.ra + Math.sin(t * f.sb * 0.6 + f.ph * 2.7) * f.ra * 0.5) * this.W;
       const y = (f.ay + Math.cos(t * f.sb + f.ph * 1.3) * f.ra * 0.7 + Math.sin(t * f.sa * 0.8 + f.ph) * f.ra * 0.35) * this.H;
       f.sp.position.set(x, y);
       const glow = Math.max(0, Math.sin(t * f.pr + f.ph * 3));
-      f.sp.alpha = nightK * (0.14 + 0.86 * glow * glow);
+      f.sp.alpha = i < n ? k * (0.14 + 0.86 * glow * glow) : 0;
       const s = (f.big ? 1.15 : 0.8) * (0.75 + 0.4 * glow);
       f.sp.scale.set(s);
     }
