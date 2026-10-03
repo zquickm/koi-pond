@@ -405,7 +405,7 @@ if (calmWater) {
 // 青蛙：默认荷塘就是夏景——只有夏景有青蛙活动，春/秋/冬图没有；
 // ?frog=1 可在其他季节底图上强制预览。实现与落脚点标定在 lily.ts / pondzone.PERCHES。
 const frog = new Frog(frogTex);
-const critters = new Critters(tadArts, dflyTex);
+const critters = new Critters(tadArts, dflyTex, (x, y) => pond.probe(x, y).d > 10);
 const foodLayer = new FoodLayer();
 const dayTint = new DayTint();
 // 水色罩：薄薄一层水色压在鱼上，让它们"沉"进画里
@@ -446,6 +446,7 @@ app.stage.addChild(
   water.waveMap,
   waterBody,
   waterFx,
+  critters.water, // 蝌蚪（春天限定）：鱼层之下，吃昼夜 multiply 与折射
   school.shadows,
   school.layer,
   foodLayer.container,
@@ -702,6 +703,8 @@ app.ticker.add((tk) => {
   const summerScene = seasonCur === 'v7';
   const dflyOn = seasonQuery.has('dfly') || (summerScene && nfHour >= 7 && nfHour <= 18.5);
   const frogOn = seasonQuery.has('frog') || summerScene;
+  // 蝌蚪=春天的身份（春孵蝌蚪，夏成蛙）；?tad=1 跨季预览
+  const tadOn = seasonQuery.has('tad') || seasonCur === 'spring';
   // 焦散推进：正午最亮、夜里只剩月光级光网（fish-d dayPhase causticMul 1.0↔0.22）
   const wxHour = cfg.hour ?? nowHour();
   const dayness = Math.max(0, Math.min(1, 1 - Math.abs(wxHour - 12) / 9));
@@ -714,7 +717,7 @@ app.ticker.add((tk) => {
   audit?.();
   frog.setSeasonal(frogOn);
   frog.update(dt, T, wake);
-  critters.update(dt, T, W, H, wake, dflyOn);
+  critters.update(dt, T, W, H, wake, dflyOn, tadOn);
   // 蜻蜓跟昼夜色调一起染（它在 dayTint 层之上，不染就会下午比四周亮）
   critters.air.tint = dayTint.sp.tint;
   // 萤火虫按中国真实情况（2026-10-03）：日落后约 19:20 渐现、上半夜最盛，午夜后渐稀、1:30 前收场；

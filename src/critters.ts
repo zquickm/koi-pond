@@ -19,6 +19,7 @@ class Tadpole {
   private heading: number;
   private phase = Math.random() * 7;
   private speed: number;
+  private born = false; // 首帧才落水：构造时拿不到真实屏幕尺寸
 
   constructor(arts: TadArt[], idx: number, W: number, H: number) {
     const art = arts[idx % arts.length];
@@ -40,12 +41,43 @@ class Tadpole {
     this.sp.position.set(this.x, this.y);
   }
 
-  update(dt: number, t: number, W: number, H: number) {
+  /** 找一个水里的落点（试 24 次，兜底池心）；首帧与"发现自己在岸上"（窗口重排后）都会走到 */
+  private respawn(W: number, H: number, wet: Wet) {
+    for (let i = 0; i < 24; i++) {
+      const x = W * (0.15 + Math.random() * 0.7);
+      const y = H * (0.15 + Math.random() * 0.7);
+      if (wet(x, y)) {
+        this.x = x;
+        this.y = y;
+        return;
+      }
+    }
+    this.x = W * 0.5;
+    this.y = H * 0.5;
+  }
+
+  update(dt: number, t: number, W: number, H: number, wet?: Wet) {
+    if (wet && !this.born) {
+      this.respawn(W, H, wet);
+      this.born = true;
+    }
     this.heading += Math.sin(t * 0.3 + this.phase) * 0.4 * dt + Math.sin(t * 0.13 + this.phase * 2) * 0.3 * dt;
     // 蝌蚪是"蹬一下滑一下"的节奏
     const sp = this.speed * (0.35 + 1.1 * Math.abs(Math.sin(t * 1.4 + this.phase)) ** 2);
-    this.x += Math.cos(this.heading) * sp * dt;
-    this.y += Math.sin(this.heading) * sp * dt;
+    if (wet) {
+      // 水域围栏：下一步是岸就原地掉头（朝向加抖动，不会卡成整齐一排）
+      const nx = this.x + Math.cos(this.heading) * sp * dt;
+      const ny = this.y + Math.sin(this.heading) * sp * dt;
+      if (wet(nx, ny)) {
+        this.x = nx;
+        this.y = ny;
+      } else {
+        this.heading += Math.PI + (Math.random() - 0.5) * 1.2;
+      }
+    } else {
+      this.x += Math.cos(this.heading) * sp * dt;
+      this.y += Math.sin(this.heading) * sp * dt;
+    }
     if (this.x < 50 || this.x > W - 50) {
       this.heading = Math.PI - this.heading;
       this.x = Math.max(50, Math.min(W - 50, this.x));
@@ -61,6 +93,8 @@ class Tadpole {
 }
 
 type Wake = (nx: number, ny: number, r?: number, s?: number) => void;
+/** 水域判定（屏幕像素坐标）：false=岸上 */
+type Wet = (x: number, y: number) => boolean;
 
 class Dragonfly {
   readonly root = new Container();
@@ -715,19 +749,25 @@ export class Critters {
   private tads: Tadpole[] = [];
   private dfly: Dragonfly;
 
-  constructor(arts: TadArt[], dflyTex: Texture) {
+  constructor(arts: TadArt[], dflyTex: Texture, private wet?: Wet) {
     for (let i = 0; i < 8; i++) {
       const tad = new Tadpole(arts, i, 1600, 1000);
       this.tads.push(tad);
       this.water.addChild(tad.sp);
     }
+    this.water.alpha = 0; // 非春天从全隐开始，避免开局闪一帧
+    this.water.visible = false;
     this.dfly = new Dragonfly(dflyTex);
     this.air.addChild(this.dfly.root);
   }
 
-  update(dt: number, t: number, W: number, H: number, wake?: Wake, dflyOn = true) {
+  /** tadOn=春天（春孵蝌蚪，夏成蛙，2026-10-03）：渐显渐隐；隐没中/在场时都继续游，淡完才停模拟 */
+  update(dt: number, t: number, W: number, H: number, wake?: Wake, dflyOn = true, tadOn = false) {
     this.dfly.setSeasonal(dflyOn);
-    for (const tad of this.tads) tad.update(dt, t, W, H);
+    const show = tadOn || this.water.alpha > 0.02;
+    this.water.visible = show;
+    if (show) for (const tad of this.tads) tad.update(dt, t, W, H, this.wet);
+    this.water.alpha = Math.max(0, Math.min(1, this.water.alpha + (tadOn ? 1 : -1) * dt * 1.4));
     this.dfly.update(dt, t, W, H, wake);
   }
 }
