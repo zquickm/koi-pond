@@ -623,6 +623,11 @@ const audit = (() => {
   };
 })();
 
+// 时钟/农历小组件（DOM 水印式，右上角）：冬季额外给这块加一层"雪"（?snow 预览常开）。
+// 积雪跟运行时季节走（2026-10-03）：换季溶解落定时 setSnowy，不再按启动季节定死
+const widget = new ClockWidget();
+widget.start(cfg.hour, cfg.season === 'winter' || forceSnow);
+
 app.ticker.add((tk) => {
   const dt = Math.min(tk.deltaMS / 1000, 0.05);
   T += dt;
@@ -641,6 +646,8 @@ app.ticker.add((tk) => {
       bottomNext.alpha = 0;
       seasonCur = seasonNext;
       seasonNext = '';
+      // 时钟积雪跟其它季节闸口同一时机走（2026-10-03）：溶解落定才进冬开雪/离冬收雪
+      widget.setSnowy(seasonCur === 'winter' || forceSnow);
     }
   }
   // 冰层跟季节走：冬季=1；向冬溶解按进度升、离冬按进度降（与底图同步）
@@ -778,7 +785,3 @@ app.ticker.add((tk) => {
     f.y = H * (0.5 + 0.3 * Math.sin(T * 0.017 + i * 1.7));
   });
 });
-
-// 时钟/农历小组件（DOM 水印式，右上角）：冬季额外给这块加一层"雪"
-const widget = new ClockWidget();
-widget.start(cfg.hour, cfg.season === 'winter' || forceSnow);

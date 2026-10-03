@@ -138,6 +138,7 @@ export class ClockWidget {
     this.fitSnow();
     this.drawSnow(0);
     const step = (now: number) => {
+      if (!this.snowy) return; // setSnowy(false) 后这帧不再排下一帧，循环自灭
       const dt = Math.min((now - (this.last || now)) / 1000, 0.05);
       this.last = now;
       this.t += dt;
@@ -145,6 +146,31 @@ export class ClockWidget {
       requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
+  }
+
+  /** 运行时切季跟雪走（2026-10-03，不再启动时定死）：进冬开、离冬收；?snow 预览常开不受影响。
+   *  收摊要全清：canvas 摘掉、rAF 自灭、pile/flakes 归零——重开时 fitSnow 靠 cw=0 走全新初始化 */
+  setSnowy(on: boolean) {
+    if (on === this.snowy) return;
+    if (on) {
+      this.enableSnow();
+      return;
+    }
+    this.snowy = false;
+    this.el.classList.remove('koi-snowy');
+    this.cv?.remove();
+    this.cv = null;
+    this.cx = null;
+    this.textCv = null;
+    this.flakes = [];
+    this.slumps = [];
+    this.pile = new Float32Array(0);
+    this.topY = new Int32Array(0);
+    this.holdMax = new Float32Array(0);
+    this.cool = new Float32Array(0);
+    this.lastText = '';
+    this.cw = 0;
+    this.ch = 0;
   }
 
   /** canvas 跟着文字块大小走；尺寸变了就重画字形层 */
