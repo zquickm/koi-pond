@@ -52,6 +52,7 @@ export type CausticParams = {
   gain?: number; // 光强
   speed?: number; // 流动速度
   strength?: number; // overlay 混合强度基准
+  resolution?: number; // 滤镜渲染目标分辨率（相对渲染器分辨率）；大块软纹可调低省显存
 };
 
 export class Caustics {
@@ -68,7 +69,7 @@ export class Caustics {
     this.strength = opts.strength ?? 0.95;
     this.filter = new Filter({
       glProgram: GlProgram.from({ vertex: VERT, fragment: FRAG }),
-      resolution: 0.5,
+      resolution: opts.resolution ?? 0.5,
       antialias: false,
       padding: 0,
       resources: {
