@@ -18,7 +18,11 @@ class Tadpole {
   private y: number;
   private heading: number;
   private phase = Math.random() * 7;
-  private speed: number;
+  private vmul = 0.85 + Math.random() * 0.5; // 个体速度差
+  private v = 0; // 当前速度（沿航向，冲刺时有推力、其余时候被"水阻"衰减）
+  private burstLeft = 0; // 本次冲刺剩余时长
+  private restLeft = 1 + Math.random() * 2.5; // 开场先静一静，别齐刷刷动
+  private kick = Math.random() * 7; // 尾鞭时钟：冲刺快摆、滑行减速、歇着微颤
   private born = false; // 首帧才落水：构造时拿不到真实屏幕尺寸
 
   constructor(arts: TadArt[], idx: number, W: number, H: number) {
@@ -35,7 +39,6 @@ class Tadpole {
       this.sp.scale.set(s);
     }
     this.heading = Math.random() * Math.PI * 2;
-    this.speed = 9 + Math.random() * 7;
     this.x = W * (0.15 + Math.random() * 0.7);
     this.y = H * (0.15 + Math.random() * 0.7);
     this.sp.position.set(this.x, this.y);
@@ -61,22 +64,43 @@ class Tadpole {
       this.respawn(W, H, wet);
       this.born = true;
     }
-    this.heading += Math.sin(t * 0.3 + this.phase) * 0.4 * dt + Math.sin(t * 0.13 + this.phase * 2) * 0.3 * dt;
-    // 蝌蚪是"蹬一下滑一下"的节奏
-    const sp = this.speed * (0.35 + 1.1 * Math.abs(Math.sin(t * 1.4 + this.phase)) ** 2);
+    if (this.burstLeft > 0) {
+      // 冲刺段：一下一下蹬水（每蹬一下一个推力峰），沿航向走带一点微弧
+      this.burstLeft -= dt;
+      this.kick += dt * 17;
+      const push = 0.55 + 0.45 * Math.abs(Math.sin(this.kick));
+      this.v = 135 * this.vmul * push;
+      this.heading += Math.sin(t * 2.1 + this.phase) * 0.25 * dt;
+    } else {
+      // 滑行段：水里阻尼很快衰减；停稳后歇一会儿，换个方向再蹬下一趟
+      this.v *= Math.exp(-3.4 * dt);
+      if (this.v < 7) {
+        this.v = 0;
+        this.restLeft -= dt;
+        if (this.restLeft <= 0) {
+          // 多数时候小转向，偶尔掉个大弯；少数急性子歇一拍就再蹬
+          this.heading += Math.random() < 0.14 ? (Math.random() - 0.5) * 2.6 : (Math.random() - 0.5) * 0.9;
+          this.burstLeft = 0.3 + Math.random() * 0.45;
+          this.restLeft = Math.random() < 0.2 ? 0.15 + Math.random() * 0.3 : 0.8 + Math.random() * 2.6;
+        }
+      }
+    }
     if (wet) {
-      // 水域围栏：下一步是岸就原地掉头（朝向加抖动，不会卡成整齐一排）
-      const nx = this.x + Math.cos(this.heading) * sp * dt;
-      const ny = this.y + Math.sin(this.heading) * sp * dt;
+      // 水域围栏：下一步是岸就原地收脚（这趟作废，掉头歇一拍）
+      const nx = this.x + Math.cos(this.heading) * this.v * dt;
+      const ny = this.y + Math.sin(this.heading) * this.v * dt;
       if (wet(nx, ny)) {
         this.x = nx;
         this.y = ny;
-      } else {
+      } else if (this.v > 12) {
         this.heading += Math.PI + (Math.random() - 0.5) * 1.2;
+        this.burstLeft = 0;
+        this.v = 0;
+        this.restLeft = 0.12 + Math.random() * 0.35;
       }
     } else {
-      this.x += Math.cos(this.heading) * sp * dt;
-      this.y += Math.sin(this.heading) * sp * dt;
+      this.x += Math.cos(this.heading) * this.v * dt;
+      this.y += Math.sin(this.heading) * this.v * dt;
     }
     if (this.x < 50 || this.x > W - 50) {
       this.heading = Math.PI - this.heading;
@@ -88,7 +112,10 @@ class Tadpole {
     }
     this.phase += dt * 2;
     this.sp.position.set(this.x, this.y);
-    this.sp.rotation = this.heading - this.fwd + Math.sin(t * 6 + this.phase) * 0.08;
+    // 摆尾跟着速度走：冲刺猛摆、滑行缓摆、歇着几乎不动（之前匀速小摆是"漂"感的元凶）
+    this.kick += this.burstLeft > 0 ? 0 : dt * (1.5 + this.v * 0.1);
+    const wagA = this.burstLeft > 0 ? 0.24 : Math.min(0.1, 0.015 + this.v * 0.0016);
+    this.sp.rotation = this.heading - this.fwd + Math.sin(this.kick) * wagA;
   }
 }
 
