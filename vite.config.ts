@@ -8,4 +8,7 @@ export default defineConfig({
     port: 5175,
     strictPort: true,
   },
+  // 单文件内联（inlineDynamicImports/manualChunks 合并）试过两版都不行：
+  // PixiJS v8 的模块环被 rollup 摊平后 TDZ 炸（rollup#6064，未修）。
+  // 维持多文件分块——fish-d 同代包就是多文件 ES 模块上架 WE 跑了 6 版，机制已验证。
 });

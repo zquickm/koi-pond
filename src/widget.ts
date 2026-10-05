@@ -148,6 +148,11 @@ export class ClockWidget {
     requestAnimationFrame(step);
   }
 
+  /** WE 设置面板「显示时钟」：整块显隐。雪景状态保留，隐藏期间只是不可见 */
+  setVisible(on: boolean) {
+    this.el.style.display = on ? '' : 'none';
+  }
+
   /** 运行时切季跟雪走（2026-10-03，不再启动时定死）：进冬开、离冬收；?snow 预览常开不受影响。
    *  收摊要全清：canvas 摘掉、rAF 自灭、pile/flakes 归零——重开时 fitSnow 靠 cw=0 走全新初始化 */
   setSnowy(on: boolean) {

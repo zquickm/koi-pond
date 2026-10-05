@@ -6,13 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "pack:we": "npm run build && node scripts/pack-we.mjs"
   },
   "dependencies": {
     "lunar-javascript": "^1.7.7",
     "pixi.js": "^8.6.6"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
     "typescript": "^5.6.3",
     "vite": "^7.1.0"
   },

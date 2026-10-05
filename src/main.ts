@@ -11,6 +11,7 @@ import { ClockWidget } from './widget';
 import { Caustics } from './caustic';
 import { PERCHES, PondZone, ZONES } from './pondzone';
 import { bboxCrop, cutoutCanvas, reblushKoi, rotateToHeadLeft, splitComponents, tex, washTowardWhite } from './cutout';
+import { onWeProps, seasonOfMonth, weBool, weNum } from './we';
 import type { KoiVariant } from './cutout';
 import koi1Url from './assets/koi-1.png';
 import koi3Url from './assets/koi-3.png';
@@ -42,6 +43,7 @@ await app.init({
   background: '#cdd9cf',
   resolution: Math.min(window.devicePixelRatio || 1, 2),
   autoDensity: true,
+  preference: 'webgl', // 目标环境（WE 的 CEF/WebView2、Plash 的 WKWebView）都只有 WebGL；WebGPU 路径未验证过
 });
 document.body.appendChild(app.canvas);
 app.ticker.maxFPS = cfg.fps;
@@ -643,6 +645,29 @@ const audit = (() => {
 // 积雪跟运行时季节走（2026-10-03）：换季溶解落定时 setSnowy，不再按启动季节定死
 const widget = new ClockWidget();
 widget.start(cfg.hour, cfg.season === 'winter' || forceSnow);
+
+// —— Wallpaper Engine 设置面板接线（project.json 属性 → 运行时应用，通道见 src/we.ts）——
+// WE 加载时全量推一次、用户改动时再推；每项都当场生效，不依赖启动时序。
+const WE_SEASON = ['', 'spring', 'v7', 'autumn', 'winter'] as const; // 0=自动(按真实月份)，与 project.json options 对齐
+onWeProps((p) => {
+  const s = weNum(p, 'season');
+  if (s !== null) setSeason(s === 0 ? seasonOfMonth() : (WE_SEASON[s] ?? ''));
+  const n = weNum(p, 'fishcount');
+  if (n !== null) school.setCount(Math.round(n));
+  const f = weNum(p, 'fps');
+  if (f !== null) app.ticker.maxFPS = f;
+  const d = weBool(p, 'daycycle');
+  if (d !== null) cfg.hour = d ? null : 12; // 关=恒定正午亮景
+  const c = weBool(p, 'clockshow');
+  if (c !== null) widget.setVisible(c);
+});
+// ?debug 时暴露换季内部状态，供无头核对（与 audit 同一门槛，正式包无副作用）
+if (seasonQuery.has('debug')) {
+  (window as unknown as Record<string, unknown>).__koiDebug = {
+    season: () => ({ cur: seasonCur, next: seasonNext, fadeLeft }),
+    setSeason,
+  };
+}
 
 app.ticker.add((tk) => {
   const dt = Math.min(tk.deltaMS / 1000, 0.05);

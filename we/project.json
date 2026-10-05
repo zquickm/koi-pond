@@ -1,0 +1,115 @@
+{
+	"contentrating" : "Everyone",
+	"description" : "一座可交互的水彩锦鲤池塘。你忙别的时候它一直在动：光、颜色、天气和小生物都跟着你真实的时刻与季节走。\n\n[h2]它有什么[/h2]\n[list]\n[*] [b]四季池塘:[/b]底图跟着真实月份换景（春·蝌蚪与小雨 / 夏·荷塘蛙鸣蜻蜓·阵雨雷电 / 秋 / 冬·冰湖裂缝落雪），也可以在设置里手动锁住一季；换季是柔和的交叉溶解。\n[*] [b]真实日光:[/b]光的方向、颜色和亮度跟着你的真实时钟——正午明亮、黄昏偏暖、夜里偏冷偏暗，池塘和桌面上的时间是一致的。\n[*] [b]时钟与农历:[/b]右上角有时钟、公历日期、农历与节气，冬季字顶还会积雪。\n[*] [b]可互动:[/b]点击水面投食，鱼会围过来吃；鱼会躲开凑太近的光标。冬天湖面结冰，鱼潜到冰下——点击改玩雪：撒雪、积雪堆、连点几次还能堆出雪人。\n[*] [b]省电:[/b]帧率上限可在设置里调低；时钟支持手动显隐。\n[/list]\n\n[h2]设置[/h2]\n[list]\n[*] 季节:自动(按真实月份) / 春 / 夏 / 秋 / 冬\n[*] 锦鲤数量（10–200）\n[*] 帧率上限\n[*] 光随时间走（关=恒定白天）\n[*] 显示时钟\n[/list]\n\n[hr][/hr]\n[h2]English[/h2]\nA hand-painted watercolor koi pond that keeps living while you work: light, weather and little creatures follow your real clock and the real season.\n\n[h2]Highlights[/h2]\n[list]\n[*] [b]Four seasons:[/b] the pond follows the real month (spring - tadpoles & light rain / summer - lotus, frogs, dragonflies, showers & lightning / autumn / winter - frozen lake, ice cracks, snow), or lock a season in the settings; seasons cross-fade softly.\n[*] [b]Real daylight:[/b] light direction, colour and brightness track your actual clock - bright at noon, warm at dusk, cool and dim at night.\n[*] [b]Clock & lunar calendar:[/b] time, date, lunar date and solar terms in the corner; snow piles up on the digits in winter.\n[*] [b]Interactive:[/b] click the water to drop food and fish gather; they shy away from a close cursor. In winter the lake freezes - clicking plays with snow instead: scatter snow, build piles, and stack a snowman with a few more clicks.\n[*] [b]Light on your PC:[/b] adjustable FPS cap; the clock widget can be hidden.\n[/list]\n\n[h2]Settings[/h2]\n[list]\n[*] Season: automatic (by real month) / spring / summer / autumn / winter\n[*] Number of koi (10-200)\n[*] FPS cap\n[*] Light follows real time (off = always daytime)\n[*] Show clock\n[/list]\n\n[hr][/hr]\n[i]静下来,看看水。/ Sit back and watch the water.[/i]",
+	"file" : "index.html",
+	"general" :
+	{
+		"localization" :
+		{
+			"en-us" :
+			{
+				"ui_clockshow" : "Show Clock",
+				"ui_daycycle" : "Light Follows Real Time",
+				"ui_fishcount" : "Number of Koi",
+				"ui_fps" : "FPS Cap",
+				"ui_season" : "Season",
+				"ui_season_auto" : "Automatic (by month)",
+				"ui_season_autumn" : "Autumn",
+				"ui_season_spring" : "Spring",
+				"ui_season_summer" : "Summer",
+				"ui_season_winter" : "Winter"
+			},
+			"zh-chs" :
+			{
+				"ui_clockshow" : "显示时钟",
+				"ui_daycycle" : "光随时间走",
+				"ui_fishcount" : "锦鲤数量",
+				"ui_fps" : "帧率上限",
+				"ui_season" : "季节",
+				"ui_season_auto" : "自动(按真实月份)",
+				"ui_season_autumn" : "秋",
+				"ui_season_spring" : "春",
+				"ui_season_summer" : "夏",
+				"ui_season_winter" : "冬"
+			}
+		},
+		"properties" :
+		{
+			"clockshow" :
+			{
+				"index" : 4,
+				"order" : 104,
+				"text" : "ui_clockshow",
+				"type" : "bool",
+				"value" : true
+			},
+			"daycycle" :
+			{
+				"index" : 3,
+				"order" : 103,
+				"text" : "ui_daycycle",
+				"type" : "bool",
+				"value" : true
+			},
+			"fishcount" :
+			{
+				"index" : 1,
+				"max" : 200,
+				"min" : 10,
+				"order" : 101,
+				"text" : "ui_fishcount",
+				"type" : "slider",
+				"value" : 66
+			},
+			"fps" :
+			{
+				"index" : 2,
+				"max" : 120,
+				"min" : 15,
+				"order" : 102,
+				"text" : "ui_fps",
+				"type" : "slider",
+				"value" : 60
+			},
+			"season" :
+			{
+				"index" : 0,
+				"options" :
+				[
+					{
+						"label" : "ui_season_auto",
+						"value" : 0
+					},
+					{
+						"label" : "ui_season_spring",
+						"value" : 1
+					},
+					{
+						"label" : "ui_season_summer",
+						"value" : 2
+					},
+					{
+						"label" : "ui_season_autumn",
+						"value" : 3
+					},
+					{
+						"label" : "ui_season_winter",
+						"value" : 4
+					}
+				],
+				"order" : 100,
+				"text" : "ui_season",
+				"type" : "combo",
+				"value" : 0
+			}
+		}
+	},
+	"preview" : "preview.gif",
+	"ratingsex" : "none",
+	"ratingviolence" : "none",
+	"tags" : [ "Relaxing" ],
+	"title" : "锦鲤池塘 (Koi Pond)",
+	"type" : "web",
+	"version" : 1,
+	"visibility" : "public"
+}

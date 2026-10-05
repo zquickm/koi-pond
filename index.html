@@ -18,6 +18,18 @@
     </style>
   </head>
   <body>
+    <!-- Wallpaper Engine 属性通道：WE 会在页面生命期内回调 applyUserProperties（加载时全量一次 +
+         用户改动时增量）。这里只做最原始的转发（存 __weProps + 广播 we-props 事件），具体接线在
+         src/main.ts 末尾 —— 全部运行时应用，无论 WE 何时推送都不会丢。 -->
+    <script>
+      window.__weProps = {};
+      window.wallpaperPropertyListener = {
+        applyUserProperties: function (p) {
+          Object.assign(window.__weProps, p);
+          window.dispatchEvent(new Event('we-props'));
+        },
+      };
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

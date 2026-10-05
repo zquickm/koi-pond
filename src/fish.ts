@@ -413,16 +413,13 @@ export class School {
   private fishes: Fish[] = [];
   private leaders: SchoolLeader[] = [];
   private pond: PondZone | null;
+  private texs: Texture[];
+  private ni = 0; // 编队游标：跟随头鱼的鱼按 0,1,2… 轮流派队
 
   constructor(texs: Texture[], count: number, zone: PondZone | null = null) {
+    this.texs = texs;
     this.pond = zone;
-    for (let i = 0; i < count; i++) {
-      const f = new Fish(texs[i % texs.length], zone);
-      this.fishes.push(f);
-      this.shadows.addChild(f.shadow);
-      this.layer.addChild(f.container);
-    }
-    // 成群（fish-d）：40% 独游，其余编入 3 队跟随虚拟头鱼
+    // 成群（fish-d）：3 队跟随虚拟头鱼；加鱼时 60% 入队、40% 独游
     if (zone) {
       const homes: [number, number][] = [
         [0.32, 0.35],
@@ -430,16 +427,32 @@ export class School {
         [0.48, 0.62],
       ];
       this.leaders = homes.map(([hx, hy]) => new SchoolLeader(hx, hy));
-      let ni = 0;
-      for (const f of this.fishes) {
-        if (Math.random() < 0.4) continue;
-        f.school = {
-          leader: this.leaders[ni++ % this.leaders.length],
-          frac: Math.random(),
-          side: (Math.random() - 0.5) * 110,
-          slotPhase: Math.random() * Math.PI * 2,
-        };
-      }
+    }
+    for (let i = 0; i < count; i++) this.addFish();
+  }
+
+  /** 运行时增减鱼（WE 设置面板的「锦鲤数量」滑杆）：多的收走、少的补齐，补进来的照常 60% 编队 */
+  setCount(n: number) {
+    while (this.fishes.length > n) {
+      const f = this.fishes.pop()!;
+      f.container.destroy();
+      f.shadow.destroy();
+    }
+    while (this.fishes.length < n) this.addFish();
+  }
+
+  private addFish() {
+    const f = new Fish(this.texs[this.fishes.length % this.texs.length], this.pond);
+    this.fishes.push(f);
+    this.shadows.addChild(f.shadow);
+    this.layer.addChild(f.container);
+    if (this.pond && this.leaders.length && Math.random() >= 0.4) {
+      f.school = {
+        leader: this.leaders[this.ni++ % this.leaders.length],
+        frac: Math.random(),
+        side: (Math.random() - 0.5) * 110,
+        slotPhase: Math.random() * Math.PI * 2,
+      };
     }
   }
 
